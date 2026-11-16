@@ -128,7 +128,7 @@ func BuildReadDocument(c *docparse.Corpus, docID, chapterID string) (ReadDocumen
 	}
 	out.Chapter = &chapterOut{
 		ID: ch.ID, Title: ch.Title, SourcePath: src, Start: ch.Start, End: ch.End,
-		Markdown: c.Text(ch), Commands: nonNil(ch.Commands), Glossary: c.GlossaryFor(ch.Terms),
+		Markdown: c.Text(ch), Commands: nonNil(ch.Commands), Glossary: c.GlossaryForChapter(ch),
 	}
 	return out, nil
 }
@@ -268,8 +268,8 @@ func CreateDefineTermSchema(c *docparse.Corpus) *jsonschema.Schema {
 	schema, _ := jsonschema.For[defineTermIn](nil)
 	if schema != nil {
 		terms := make([]string, 0, len(c.Glossary))
-		for i := range c.Glossary {
-			terms = append(terms, c.Glossary[i].Term)
+		for _, e := range c.GlossaryEntries() {
+			terms = append(terms, e.Term)
 		}
 		setEnum(schema, "term", terms)
 	}

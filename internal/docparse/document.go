@@ -50,7 +50,6 @@ type Chapter struct {
 	FilePath   string   `json:"file_path" yaml:"file_path"`                         // file the chapter was parsed from (preferred)
 	SourcePath string   `json:"source_path,omitempty" yaml:"source_path,omitempty"` // original file before combining
 	Commands   []string `json:"commands,omitempty" yaml:"commands,omitempty"`
-	Terms      []string `json:"terms,omitempty" yaml:"terms,omitempty"` // glossary terms mentioned in the prose
 
 	// DocBook assemblies only; not exposed via MCP
 	Number        string       `json:"number,omitempty" yaml:"number,omitempty"`         // as in the published document: "19" (chapter), "A" (appendix), "3" (section of an article)

@@ -380,17 +380,17 @@ func TestDocBookCorpus(t *testing.T) {
 	if want := "## 2 More {#more}\n\nContainer abstract.\n\n### 2.1 About the demo {#about}\n\nThe CIB of SUSE Linux Enterprise Server.\n\n#### 2.1.1 Details {#about-sec}"; !strings.HasPrefix(c.Text(&more), want) {
 		t.Errorf("container markdown = %q", c.Text(&more))
 	}
-	if !reflect.DeepEqual(more.Terms, []string{"CIB (cluster information base)"}) {
-		t.Errorf("terms = %q", more.Terms)
+	terms := c.GlossaryForChapter(&more)
+	if len(terms) != 1 || terms[0].Term != "CIB (cluster information base)" {
+		t.Errorf("terms = %+v", terms)
 	}
 
 	// shared glossary, deduplicated across the two documents
-	want := []docparse.GlossaryEntry{
-		{Term: "CIB (cluster information base)", WhatIs: "The cluster configuration, see node."},
-		{Term: "node", WhatIs: "A member."},
-	}
-	if len(c.Glossary) != 2 || c.Glossary[0].Term != want[0].Term || c.Glossary[0].WhatIs != want[0].WhatIs || c.Glossary[1].WhatIs != want[1].WhatIs {
-		t.Errorf("glossary = %+v", c.Glossary)
+	got := c.GlossaryEntries()
+	if len(got) != 2 ||
+		got[0].Term != "CIB (cluster information base)" || got[0].WhatIs != "The cluster configuration, see node." ||
+		got[1].Term != "node" || got[1].WhatIs != "A member." {
+		t.Errorf("glossary = %+v", got)
 	}
 	if hits := c.FindCommand("zypper", nil); len(hits) != 2 {
 		t.Errorf("find zypper = %+v", hits)

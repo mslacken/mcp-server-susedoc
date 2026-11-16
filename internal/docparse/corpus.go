@@ -6,7 +6,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"unicode"
 
 	"github.com/hbollon/go-edlib"
@@ -16,8 +15,8 @@ import (
 // and the raw lines of every source file, so that chapter text can be served
 // on demand.
 type Corpus struct {
-	Documents []Document      `json:"documents" yaml:"documents"`
-	Glossary  []GlossaryEntry `json:"glossary" yaml:"glossary"`
+	Documents []Document              `json:"documents" yaml:"documents"`
+	Glossary  map[string]GlossaryEntry `json:"glossary" yaml:"glossary"` // key: lower case term
 
 	lines    map[string][]string // source -> lines, see Chapter.LinesKey
 	ids      map[string]int      // document ids handed out, see AddDocument
@@ -37,7 +36,7 @@ type Part struct {
 // NewCorpus returns an empty corpus for a parser to fill with AddLines,
 // AddDocument and AddGlossary. Finish must be called once it is complete.
 func NewCorpus() *Corpus {
-	return &Corpus{Documents: []Document{}, lines: map[string][]string{}, ids: map[string]int{}}
+	return &Corpus{Documents: []Document{}, Glossary: map[string]GlossaryEntry{}, lines: map[string][]string{}, ids: map[string]int{}}
 }
 
 // Add merges the documents, glossary and lines of p into the corpus.
@@ -68,66 +67,37 @@ func (c *Corpus) AddDocument(doc Document) {
 // glossary, so the first definition of a term wins.
 func (c *Corpus) AddGlossary(entries []GlossaryEntry) {
 	for _, e := range entries {
-		if c.term(e.Term) == nil {
-			c.Glossary = append(c.Glossary, e)
+		if _, ok := c.Glossary[strings.ToLower(e.Term)]; !ok {
+			c.Glossary[strings.ToLower(e.Term)] = e
 		}
 	}
 }
 
+// term looks up a glossary entry by term, case insensitive.
 func (c *Corpus) term(term string) *GlossaryEntry {
-	for i := range c.Glossary {
-		if strings.EqualFold(c.Glossary[i].Term, term) {
-			return &c.Glossary[i]
-		}
+	e, ok := c.Glossary[strings.ToLower(term)]
+	if !ok {
+		return nil
 	}
-	return nil
+	return &e
 }
 
-// Finish sorts the glossary, records which glossary terms every chapter
-// mentions, builds the document frequencies used by search and the index of
-// commands used by FindCommand.
+// Finish compiles the glossary matchers and builds the document frequencies
+// used by search and the index of commands used by FindCommand. Which glossary
+// terms a chapter mentions is computed on demand, when the chapter is served.
 func (c *Corpus) Finish() {
-	sort.Slice(c.Glossary, func(i, j int) bool {
-		return strings.ToLower(c.Glossary[i].Term) < strings.ToLower(c.Glossary[j].Term)
-	})
-	for i := range c.Glossary {
-		c.Glossary[i].match = glossaryMatchers(c.Glossary[i].Term)
-		c.Glossary[i].needles = glossaryNeedles(c.Glossary[i].Term)
+	for term := range c.Glossary {
+		e := c.Glossary[term]
+		e.match = glossaryMatchers(e.Term)
+		e.needles = glossaryNeedles(e.Term)
+		c.Glossary[term] = e
 	}
-	// The glossary matching is the slow part: every chapter's prose is scanned
-	// against the glossary, which is CPU bound and independent per chapter, so
-	// run it in parallel. DocBook documents share topics, so the same prose is
-	// only matched once, cached by a mutex.
-	var chapters []*Chapter
-	for d := range c.Documents {
-		for i := range c.Documents[d].Chapters {
-			chapters = append(chapters, &c.Documents[d].Chapters[i])
-		}
-	}
-	cache := map[string][]string{}
-	var cacheMu sync.Mutex
-	var wg sync.WaitGroup
-	for _, ch := range chapters {
-		wg.Go(func() {
-			cacheMu.Lock()
-			t, ok := cache[ch.Prose]
-			cacheMu.Unlock()
-			if !ok {
-				t = c.termsIn(ch.Prose)
-				cacheMu.Lock()
-				cache[ch.Prose] = t
-				cacheMu.Unlock()
-			}
-			ch.Terms = t
-		})
-	}
-	wg.Wait()
-	c.total = len(chapters)
-
+	c.total = 0
 	c.df = map[string]int{}
 	c.commands = nil
 	for d := range c.Documents {
 		for i := range c.Documents[d].Chapters {
+			c.total++
 			ch := &c.Documents[d].Chapters[i]
 			for _, cmd := range ch.Commands {
 				c.commands = append(c.commands, CommandHit{Command: cmd, DocID: c.Documents[d].ID, ChapterID: ch.ID, Title: ch.Title})
@@ -190,11 +160,12 @@ func glossaryNeedles(term string) []string {
 	return out
 }
 
-// termsIn returns the glossary terms mentioned in text, in glossary order.
+// termsIn returns the glossary terms mentioned in text, in term order.
 func (c *Corpus) termsIn(text string) []string {
 	var out []string
 	lower := strings.ToLower(text)
-	for _, e := range c.Glossary {
+	for _, term := range c.sortedGlossary() {
+		e := c.Glossary[term]
 		for i, re := range e.match {
 			if i < len(e.needles) && !strings.Contains(lower, e.needles[i]) {
 				continue
@@ -206,6 +177,23 @@ func (c *Corpus) termsIn(text string) []string {
 		}
 	}
 	return out
+}
+
+// GlossaryForChapter returns the glossary entries mentioned in the chapter's
+// prose, in term order.
+func (c *Corpus) GlossaryForChapter(ch *Chapter) []GlossaryEntry {
+	return c.GlossaryFor(c.termsIn(ch.Prose))
+}
+
+// sortedGlossary returns the glossary keys, sorted, so that lookups and
+// results come out in a deterministic order.
+func (c *Corpus) sortedGlossary() []string {
+	keys := make([]string, 0, len(c.Glossary))
+	for k := range c.Glossary {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // Document returns the document with the given id, or nil.
@@ -498,27 +486,28 @@ cmds:
 
 // DefineTerm looks up a term by its full name or one of its aliases. If
 // nothing matches exactly, all terms containing the query are returned. If
-// docIDs is non-empty, only terms mentioned in the documents with those ids
-// are returned; otherwise the whole glossary is searched.
+// docIDs is non-empty, only terms mentioned in the chapters of the documents
+// with those ids are returned; otherwise the whole glossary is searched.
 func (c *Corpus) DefineTerm(term string, docIDs []string) []GlossaryEntry {
 	t := strings.ToLower(strings.TrimSpace(term))
 	inScope := func(e *GlossaryEntry) bool {
 		if len(docIDs) == 0 {
 			return true
 		}
-		for _, doc := range c.Documents {
+		for i := range c.Documents {
+			doc := &c.Documents[i]
 			if !docIn(docIDs, doc.ID) {
 				continue
 			}
-			for i := range doc.Chapters {
-				if slices.Contains(doc.Chapters[i].Terms, e.Term) {
+			for j := range doc.Chapters {
+				if sliceContains(c.termsIn(doc.Chapters[j].Prose), e.Term) {
 					return true
 				}
 			}
 		}
 		return false
 	}
-	for _, e := range c.Glossary {
+	for _, e := range c.GlossaryEntries() {
 		if !inScope(&e) {
 			continue
 		}
@@ -528,17 +517,26 @@ func (c *Corpus) DefineTerm(term string, docIDs []string) []GlossaryEntry {
 		for _, a := range aliases(e.Term) {
 			if strings.ToLower(a) == t {
 				return []GlossaryEntry{e}
-			}
 		}
 	}
+	}
 	var out []GlossaryEntry
-	for _, e := range c.Glossary {
+	for _, e := range c.GlossaryEntries() {
 		if t == "" || !inScope(&e) {
 			continue
 		}
 		if strings.Contains(strings.ToLower(e.Term), t) {
 			out = append(out, e)
 		}
+	}
+	return out
+}
+
+// GlossaryEntries returns the glossary entries in term order.
+func (c *Corpus) GlossaryEntries() []GlossaryEntry {
+	out := make([]GlossaryEntry, 0, len(c.Glossary))
+	for _, key := range c.sortedGlossary() {
+		out = append(out, c.Glossary[key])
 	}
 	return out
 }
@@ -552,4 +550,14 @@ func (c *Corpus) GlossaryFor(terms []string) []GlossaryEntry {
 		}
 	}
 	return out
+}
+
+// sliceContains reports whether list holds s.
+func sliceContains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
