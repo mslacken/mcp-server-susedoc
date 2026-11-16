@@ -60,6 +60,7 @@ type chapterOut struct {
 	Markdown   string                   `json:"markdown"`
 	Commands   []string                 `json:"commands,omitempty"`
 	Glossary   []docparse.GlossaryEntry `json:"glossary,omitempty"`
+	References []docparse.XrefTarget    `json:"references,omitempty"`
 }
 
 type ReadDocumentOut struct {
@@ -129,6 +130,7 @@ func BuildReadDocument(c *docparse.Corpus, docID, chapterID string) (ReadDocumen
 	out.Chapter = &chapterOut{
 		ID: ch.ID, Title: ch.Title, SourcePath: src, Start: ch.Start, End: ch.End,
 		Markdown: c.Text(ch), Commands: nonNil(ch.Commands), Glossary: c.GlossaryForChapter(ch),
+		References: nonNil(c.XrefTargets(doc.ID, ch)),
 	}
 	return out, nil
 }
@@ -296,7 +298,8 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "read_document",
 		Description: "Return a document's metadata and table of contents. If chapter_id is given, return " +
-			"that chapter's markdown, the commands it shows and the definitions of all glossary terms it mentions, " +
+			"that chapter's markdown, the commands it shows, the definitions of all glossary terms it mentions " +
+			"and where the chapter's cross references point to (unresolved ones are reported as dead), " +
 			"without the table of contents.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in readDocumentIn) (*mcp.CallToolResult, ReadDocumentOut, error) {
 		Debugf("read_document doc_id=%q chapter_id=%q", in.DocID, in.ChapterID)

@@ -343,6 +343,15 @@ func TestDocBookCorpus(t *testing.T) {
 	if want := []docparse.Xref{{Linkend: "about-sec", Resolved: true}, {Linkend: "dangling", Resolved: false}}; !reflect.DeepEqual(ch.Xrefs, want) {
 		t.Errorf("xrefs = %+v", ch.Xrefs)
 	}
+	// Cross references resolve to their navigable target: "about-sec" is a
+	// section of the "more" chapter in both documents (the own document is
+	// preferred), "dangling" resolves nowhere and is reported as a dead link.
+	if want := []docparse.XrefTarget{
+		{Linkend: "about-sec", Text: "Details", Resolved: true, DocID: "sles-demo", ChapterID: "more", SectionID: "about-sec", Title: "Details", Scope: "section"},
+		{Linkend: "dangling", Resolved: false},
+	}; !reflect.DeepEqual(c.XrefTargets("sles-demo", &ch), want) {
+		t.Errorf("xref targets = %+v", c.XrefTargets("sles-demo", &ch))
+	}
 	if !reflect.DeepEqual(ch.Links, []docparse.Link{{URL: "https://example.com/docs", Text: "the docs"}}) ||
 		!reflect.DeepEqual(ch.Images, []docparse.Image{{File: "images/overview.png", Alt: "Overview"}}) ||
 		!reflect.DeepEqual(ch.Procedures, []docparse.Procedure{{ID: "proc-install", Number: "1", Title: "Installing the package", Steps: 2}}) ||

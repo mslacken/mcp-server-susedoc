@@ -43,6 +43,18 @@
           <div class="section-h">Glossary terms mentioned</div>
           <dl class="gloss">{{range .glossary}}<dt>{{esc .term}}</dt><dd>{{esc .whatis}}</dd>{{end}}</dl>
         {{end}}
+        {{if .references}}
+          <div class="section-h">Cross references</div>
+          <ul class="refs">
+            {{range .references}}
+            {{if .resolved}}
+              <li><a href="/chapter/{{.doc_id}}/{{.chapter_id}}#{{if .section_id}}{{.section_id}}{{else}}{{.chapter_id}}{{end}}">{{esc (or .text .linkend)}}</a><span class="hint">&mdash; {{esc .title}}{{if eq .scope "section"}} ({{esc .doc_id}}/{{.chapter_id}}){{else}} ({{esc .doc_id}}){{end}}</span></li>
+            {{else}}
+              <li class="dead"><code>{{esc .linkend}}</code><span class="hint">&mdash; not found in the corpus</span></li>
+            {{end}}
+            {{end}}
+          </ul>
+        {{end}}
       </div>
     {{else}}
       <div class="hint">No chapter selected &mdash; pick one from the table of contents above.</div>

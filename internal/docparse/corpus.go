@@ -15,14 +15,25 @@ import (
 // and the raw lines of every source file, so that chapter text can be served
 // on demand.
 type Corpus struct {
-	Documents []Document              `json:"documents" yaml:"documents"`
+	Documents []Document               `json:"documents" yaml:"documents"`
 	Glossary  map[string]GlossaryEntry `json:"glossary" yaml:"glossary"` // key: lower case term
 
-	lines    map[string][]string // source -> lines, see Chapter.LinesKey
-	ids      map[string]int      // document ids handed out, see AddDocument
-	df       map[string]int      // number of chapters containing a word, for search
-	total    int                 // number of chapters
-	commands []CommandHit        // every command of every chapter, see FindCommand
+	lines     map[string][]string  // source -> lines, see Chapter.LinesKey
+	ids       map[string]int       // document ids handed out, see AddDocument
+	df        map[string]int       // number of chapters containing a word, for search
+	total     int                  // number of chapters
+	commands  []CommandHit         // every command of every chapter, see FindCommand
+	xrefIndex map[string][]xrefLoc // navigable targets of every xml:id, see Finish
+}
+
+// xrefLoc is where a cross reference linkend navigates to within the corpus: a
+// chapter, or a section within one.
+type xrefLoc struct {
+	docID     string
+	chapterID string
+	sectionID string
+	title     string
+	scope     string // "chapter" or "section"
 }
 
 // Part is what a parser read from one or more input files: the documents, the
@@ -95,12 +106,23 @@ func (c *Corpus) Finish() {
 	c.total = 0
 	c.df = map[string]int{}
 	c.commands = nil
+	c.xrefIndex = map[string][]xrefLoc{}
 	for d := range c.Documents {
-		for i := range c.Documents[d].Chapters {
+		doc := &c.Documents[d]
+		for i := range doc.Chapters {
 			c.total++
-			ch := &c.Documents[d].Chapters[i]
+			ch := &doc.Chapters[i]
+			// The chapter id navigates to the whole chapter.
+			c.xrefIndex[ch.ID] = append(c.xrefIndex[ch.ID], xrefLoc{docID: doc.ID, chapterID: ch.ID, title: ch.Title, scope: "chapter"})
+			// Each section id navigates to that section within the chapter.
+			for _, s := range ch.Sections {
+				if s.ID == "" {
+					continue
+				}
+				c.xrefIndex[s.ID] = append(c.xrefIndex[s.ID], xrefLoc{docID: doc.ID, chapterID: ch.ID, sectionID: s.ID, title: s.Title, scope: "section"})
+			}
 			for _, cmd := range ch.Commands {
-				c.commands = append(c.commands, CommandHit{Command: cmd, DocID: c.Documents[d].ID, ChapterID: ch.ID, Title: ch.Title})
+				c.commands = append(c.commands, CommandHit{Command: cmd, DocID: doc.ID, ChapterID: ch.ID, Title: ch.Title})
 			}
 			seen := map[string]bool{}
 			for _, w := range words(ch.Title + " " + c.Text(ch)) {
@@ -111,6 +133,51 @@ func (c *Corpus) Finish() {
 			}
 		}
 	}
+}
+
+// XrefTargets resolves the chapter's cross references against the whole corpus.
+// Targets found in any document are marked Resolved with the document, chapter
+// and section id to navigate to, preferring the chapter's own document when the
+// linkend resolves in more than one (e.g. the same book built for several
+// products). Linkends with no navigable target are kept with Resolved false, so
+// a dead reference is reported instead of silently dropped. Results are in the
+// order the chapter references them.
+func (c *Corpus) XrefTargets(docID string, ch *Chapter) []XrefTarget {
+	out := make([]XrefTarget, 0, len(ch.Xrefs))
+	seen := map[string]bool{}
+	for _, x := range ch.Xrefs {
+		if seen[x.Linkend] {
+			continue
+		}
+		seen[x.Linkend] = true
+		t := XrefTarget{Linkend: x.Linkend}
+		if loc := c.locate(docID, x.Linkend); loc != nil {
+			t.Resolved = true
+			t.Text = loc.title
+			t.DocID = loc.docID
+			t.ChapterID = loc.chapterID
+			t.SectionID = loc.sectionID
+			t.Title = loc.title
+			t.Scope = loc.scope
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// locate returns the navigable target of linkend, preferring a location in
+// docID when there is one, or nil if the linkend resolves nowhere.
+func (c *Corpus) locate(docID, linkend string) *xrefLoc {
+	locs := c.xrefIndex[linkend]
+	for i := range locs {
+		if locs[i].docID == docID {
+			return &locs[i]
+		}
+	}
+	if len(locs) > 0 {
+		return &locs[0]
+	}
+	return nil
 }
 
 var reAliasSplit = regexp.MustCompile(`\s*(?:,|\(|\))\s*`)
@@ -349,7 +416,7 @@ func (c *Corpus) chapterScore(text, title, summary []string, q []string, fuzzy i
 // log of the number of (fuzzy) matches of w in the chapter text, with an exact
 // match in the title counted three times and in the summary counted once.
 func (c *Corpus) wordScore(text, title, summary []string, w string, fuzzy int) float64 {
-	idf := math.Log(1 + float64(c.total) / float64(1+c.df[w]))
+	idf := math.Log(1 + float64(c.total)/float64(1+c.df[w]))
 	tf := math.Log(1 + float64(fuzzyCount(text, w, fuzzy)))
 	return (tf + 3*float64(count(title, w)) + float64(count(summary, w))) * idf
 }
@@ -517,8 +584,8 @@ func (c *Corpus) DefineTerm(term string, docIDs []string) []GlossaryEntry {
 		for _, a := range aliases(e.Term) {
 			if strings.ToLower(a) == t {
 				return []GlossaryEntry{e}
+			}
 		}
-	}
 	}
 	var out []GlossaryEntry
 	for _, e := range c.GlossaryEntries() {

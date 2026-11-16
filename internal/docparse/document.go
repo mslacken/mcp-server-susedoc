@@ -154,6 +154,22 @@ type Xref struct {
 	Resolved bool   `json:"resolved" yaml:"resolved"`
 }
 
+// XrefTarget is a cross reference of a chapter resolved against the whole
+// corpus: where its linkend points to (a chapter or a section within one), or
+// a report that it does not resolve anywhere. Resolved is false when the
+// linkend is not a navigable target in the corpus, in which case only Linkend
+// and Text are set.
+type XrefTarget struct {
+	Linkend   string `json:"linkend"`
+	Text      string `json:"text,omitempty"`
+	Resolved  bool   `json:"resolved"`
+	DocID     string `json:"doc_id,omitempty"`
+	ChapterID string `json:"chapter_id,omitempty"`
+	SectionID string `json:"section_id,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Scope     string `json:"scope,omitempty"`
+}
+
 // Link is an external link.
 type Link struct {
 	URL  string `json:"url" yaml:"url"`
