@@ -104,7 +104,6 @@ func NewLoader(root string) *Loader {
 // part holding one document, the glossary entries it contains and the
 // markdown lines of its chapters.
 func (l *Loader) Read(name string) (docparse.Part, error) {
-	debugf("Reading file: %s", name)
 	doc, glossary, lines, err := l.xml.buildDocBook(name)
 	if err != nil {
 		return docparse.Part{}, err

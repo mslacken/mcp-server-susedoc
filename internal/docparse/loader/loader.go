@@ -16,6 +16,7 @@ import (
 	"docullm/internal/docparse/docbook"
 	"docullm/internal/docparse/markdown"
 	"docullm/internal/docparse/text"
+	"docullm/internal/mcpserver"
 )
 
 // DocType is the format of an input file.
@@ -119,12 +120,15 @@ func Load(files []DocFile) (*docparse.Corpus, error) {
 		}
 	}
 	results := doRead(files, xml)
+	mcpserver.Debugf("Read: %d files", len(results))
 
 	c := newCorpus(files, results)
 	if len(c.Documents) == 0 {
 		return nil, fmt.Errorf("no usable documents found")
 	}
+	mcpserver.Debugf("Created corpus")
 	c.Finish()
+	mcpserver.Debugf("Finished")
 	return c, nil
 }
 
@@ -179,6 +183,7 @@ func newCorpus(files []DocFile, results []result) *docparse.Corpus {
 
 // read reads the file f with the parser for its type.
 func read(f DocFile, xml map[string]*docbook.Loader) result {
+	mcpserver.Debugf("Reading file: %s", f.Path)
 	switch f.Type {
 	case DocBook:
 		p, err := xml[filepath.Dir(f.Path)].Read(filepath.Base(f.Path))
