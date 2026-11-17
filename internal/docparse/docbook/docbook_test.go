@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"docullm/internal/docparse"
-	"docullm/internal/docparse/markdown"
+	"mcp-server-susedoc/internal/docparse"
+	"mcp-server-susedoc/internal/docparse/markdown"
 )
 
 // writeFiles creates the files (name -> content) below a new temp dir.

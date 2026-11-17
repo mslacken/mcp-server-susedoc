@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"docullm/internal/docparse"
+	"mcp-server-susedoc/internal/docparse"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -280,7 +280,7 @@ func CreateDefineTermSchema(c *docparse.Corpus) *jsonschema.Schema {
 
 // NewServer builds the MCP server exposing the corpus' documents.
 func NewServer(c *docparse.Corpus) *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "docullm", Version: "0.1.0"}, &mcp.ServerOptions{
+	srv := mcp.NewServer(&mcp.Implementation{Name: "mcp-server-susedoc", Version: "0.1.0"}, &mcp.ServerOptions{
 		Instructions: "Product documentation. Use search_docs or list_documents to find a document, " +
 			"read_document to get its table of contents or a chapter, find_command to find where a " +
 			"command is documented and define_term for the glossary.",

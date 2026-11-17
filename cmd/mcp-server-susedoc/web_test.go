@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"docullm/internal/docparse"
-	"docullm/internal/docparse/markdown"
+	"mcp-server-susedoc/internal/docparse"
+	"mcp-server-susedoc/internal/docparse/markdown"
 )
 
 // sampleCorpus is a small corpus with one document (two chapters, a command)

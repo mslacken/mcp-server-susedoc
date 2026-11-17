@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"os"
 
-	"docullm/internal/docparse"
-	"docullm/internal/docparse/docbook"
-	"docullm/internal/docparse/loader"
-	"docullm/internal/docparse/markdown"
-	"docullm/internal/mcpserver"
+	"mcp-server-susedoc/internal/docparse"
+	"mcp-server-susedoc/internal/docparse/docbook"
+	"mcp-server-susedoc/internal/docparse/loader"
+	"mcp-server-susedoc/internal/docparse/markdown"
+	"mcp-server-susedoc/internal/mcpserver"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gopkg.in/yaml.v3"

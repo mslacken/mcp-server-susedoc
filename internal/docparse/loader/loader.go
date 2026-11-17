@@ -12,11 +12,11 @@ import (
 	"strings"
 	"sync"
 
-	"docullm/internal/docparse"
-	"docullm/internal/docparse/docbook"
-	"docullm/internal/docparse/markdown"
-	"docullm/internal/docparse/text"
-	"docullm/internal/mcpserver"
+	"mcp-server-susedoc/internal/docparse"
+	"mcp-server-susedoc/internal/docparse/docbook"
+	"mcp-server-susedoc/internal/docparse/markdown"
+	"mcp-server-susedoc/internal/docparse/text"
+	"mcp-server-susedoc/internal/mcpserver"
 )
 
 // DocType is the format of an input file.

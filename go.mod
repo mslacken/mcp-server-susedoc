@@ -1,4 +1,4 @@
-module docullm
+module mcp-server-susedoc
 
 go 1.27.2
 

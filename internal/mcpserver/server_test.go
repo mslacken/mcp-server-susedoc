@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"docullm/internal/docparse/loader"
-	"docullm/internal/docparse/markdown"
+	"mcp-server-susedoc/internal/docparse/loader"
+	"mcp-server-susedoc/internal/docparse/markdown"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )

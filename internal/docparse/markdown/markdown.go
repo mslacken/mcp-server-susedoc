@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"docullm/internal/docparse"
+	"mcp-server-susedoc/internal/docparse"
 
 	"gopkg.in/yaml.v3"
 )

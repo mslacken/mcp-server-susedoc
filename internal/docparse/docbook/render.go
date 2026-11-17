@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"docullm/internal/docparse"
-	"docullm/internal/docparse/markdown"
+	"mcp-server-susedoc/internal/docparse"
+	"mcp-server-susedoc/internal/docparse/markdown"
 )
 
 // renderer turns profiled DocBook topics into markdown and records the

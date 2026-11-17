@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	"docullm/internal/docparse"
-	"docullm/internal/docparse/markdown"
+	"mcp-server-susedoc/internal/docparse"
+	"mcp-server-susedoc/internal/docparse/markdown"
 )
 
 var reUnderline = regexp.MustCompile(`^(?:={3,}|-{3,})\s*$`)

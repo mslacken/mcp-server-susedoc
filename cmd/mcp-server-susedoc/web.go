@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"docullm/internal/docparse"
-	"docullm/internal/mcpserver"
+	"mcp-server-susedoc/internal/docparse"
+	"mcp-server-susedoc/internal/mcpserver"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -119,7 +119,7 @@ func connect(ctx context.Context, c *docparse.Corpus) (*mcp.ClientSession, error
 	if _, err := mcpserver.NewServer(c).Connect(ctx, serverT, nil); err != nil {
 		return nil, err
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "docullm-web", Version: "0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "mcp-server-susedoc-web", Version: "0.1.0"}, nil)
 	return client.Connect(ctx, clientT, nil)
 }
 

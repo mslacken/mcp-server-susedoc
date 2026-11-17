@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"docullm/internal/docparse"
+	"mcp-server-susedoc/internal/docparse"
 
 	"github.com/gomarkdown/markdown"
 )

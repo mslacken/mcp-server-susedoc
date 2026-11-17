@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"docullm/internal/docparse"
+	"mcp-server-susedoc/internal/docparse"
 )
 
 // Debug enables diagnostic output on stderr while loading documents.
