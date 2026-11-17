@@ -309,19 +309,19 @@ func TestDocBookCorpus(t *testing.T) {
 	if sles.License != "GFDL-1.2-invariants-only OR GFDL-1.3-invariants-only" {
 		t.Errorf("license = %q", sles.License)
 	}
-	if want := (docparse.DocSource{DC: "DC-SLES-demo", Assembly: "articles/demo.asm.xml", Structure: "demo-b"}); *sles.Source != want {
-		t.Errorf("source = %+v", *sles.Source)
+	if want := (docparse.DocSource{DC: "DC-SLES-demo", Assembly: "articles/demo.asm.xml", Structure: "demo-b"}); *sles.Source() != want {
+		t.Errorf("source = %+v", *sles.Source())
 	}
 	wantMeta := docparse.DocMeta{
 		Maintainer: "tux@example.com", Series: "Products & Solutions", Tasks: []string{"Installation", "Administration"},
 		Architectures: []string{"x86"}, Updated: "2026-02-03", Description: "Meta description",
 	}
-	if !reflect.DeepEqual(*sles.Meta, wantMeta) || sap.Meta.Architectures[0] != "ppc" {
-		t.Errorf("meta = %+v", *sles.Meta)
+	if !reflect.DeepEqual(*sles.Meta(), wantMeta) || sap.Meta().Architectures[0] != "ppc" {
+		t.Errorf("meta = %+v", *sles.Meta())
 	}
-	if sles.Subtitle != "A subtitle" || sles.Translation != "yes" || sles.Bugtracker.Component != "Docs" ||
-		!reflect.DeepEqual(sles.Revisions, []docparse.Revision{{Date: "2026-01-02", Description: "Initial version"}}) {
-		t.Errorf("subtitle %q, translation %q, bugtracker %+v, revisions %+v", sles.Subtitle, sles.Translation, sles.Bugtracker, sles.Revisions)
+	if sles.Subtitle() != "A subtitle" || sles.Translation() != "yes" || sles.Bugtracker().Component != "Docs" ||
+		!reflect.DeepEqual(sles.Revisions(), []docparse.Revision{{Date: "2026-01-02", Description: "Initial version"}}) {
+		t.Errorf("subtitle %q, translation %q, bugtracker %+v, revisions %+v", sles.Subtitle(), sles.Translation(), sles.Bugtracker(), sles.Revisions())
 	}
 
 	// legal notice and glossary are not chapters
@@ -329,19 +329,19 @@ func TestDocBookCorpus(t *testing.T) {
 		t.Fatalf("chapters = %+v", sles.Chapters)
 	}
 	ch := sles.Chapters[0]
-	if ch.ID != "install" || ch.Number != "1" || ch.Title != "Install it" || ch.FilePath != "tasks/install.xml" || ch.TopicType != "task" ||
-		ch.Maintainer != "geeko@example.com" || ch.Summary != "How to install the demo." {
+	if ch.ID != "install" || ch.Number() != "1" || ch.Title != "Install it" || ch.FilePath != "tasks/install.xml" || ch.TopicType() != "task" ||
+		ch.Maintainer() != "geeko@example.com" || ch.Summary != "How to install the demo." {
 		t.Errorf("chapter = %+v", ch)
 	}
 	if want := []string{"sudo zypper in PKG", "sudo reboot now", "rpm -q demo"}; !reflect.DeepEqual(ch.Commands, want) {
 		t.Errorf("commands = %q, want %q", ch.Commands, want)
 	}
-	if !reflect.DeepEqual(ch.Includes, []string{"snippets/reboot-step.xml"}) ||
-		!reflect.DeepEqual(ch.LegacySources, []string{"https://github.com/SUSE/doc-sle/blob/main/xml/install.xml"}) {
-		t.Errorf("includes %q, legacy %q", ch.Includes, ch.LegacySources)
+	if !reflect.DeepEqual(ch.Includes(), []string{"snippets/reboot-step.xml"}) ||
+		!reflect.DeepEqual(ch.LegacySources(), []string{"https://github.com/SUSE/doc-sle/blob/main/xml/install.xml"}) {
+		t.Errorf("includes %q, legacy %q", ch.Includes(), ch.LegacySources())
 	}
-	if want := []docparse.Xref{{Linkend: "about-sec", Resolved: true}, {Linkend: "dangling", Resolved: false}}; !reflect.DeepEqual(ch.Xrefs, want) {
-		t.Errorf("xrefs = %+v", ch.Xrefs)
+	if want := []docparse.Xref{{Linkend: "about-sec", Resolved: true}, {Linkend: "dangling", Resolved: false}}; !reflect.DeepEqual(ch.Xrefs(), want) {
+		t.Errorf("xrefs = %+v", ch.Xrefs())
 	}
 	// Cross references resolve to their navigable target: "about-sec" is a
 	// section of the "more" chapter in both documents (the own document is
@@ -352,12 +352,12 @@ func TestDocBookCorpus(t *testing.T) {
 	}; !reflect.DeepEqual(c.XrefTargets("sles-demo", &ch), want) {
 		t.Errorf("xref targets = %+v", c.XrefTargets("sles-demo", &ch))
 	}
-	if !reflect.DeepEqual(ch.Links, []docparse.Link{{URL: "https://example.com/docs", Text: "the docs"}}) ||
-		!reflect.DeepEqual(ch.Images, []docparse.Image{{File: "images/overview.png", Alt: "Overview"}}) ||
-		!reflect.DeepEqual(ch.Procedures, []docparse.Procedure{{ID: "proc-install", Number: "1", Title: "Installing the package", Steps: 2}}) ||
-		!reflect.DeepEqual(ch.Admonitions, []docparse.Admonition{{Type: "note", Title: "Be careful"}}) ||
-		!reflect.DeepEqual(ch.Sections, []docparse.Section{{ID: "install-verify", Number: "1.1", Title: "Verifying", Level: 1}}) {
-		t.Errorf("structure = %+v %+v %+v %+v %+v", ch.Links, ch.Images, ch.Procedures, ch.Admonitions, ch.Sections)
+	if !reflect.DeepEqual(ch.Links(), []docparse.Link{{URL: "https://example.com/docs", Text: "the docs"}}) ||
+		!reflect.DeepEqual(ch.Images(), []docparse.Image{{File: "images/overview.png", Alt: "Overview"}}) ||
+		!reflect.DeepEqual(ch.Procedures(), []docparse.Procedure{{ID: "proc-install", Number: "1", Title: "Installing the package", Steps: 2}}) ||
+		!reflect.DeepEqual(ch.Admonitions(), []docparse.Admonition{{Type: "note", Title: "Be careful"}}) ||
+		!reflect.DeepEqual(ch.Sections(), []docparse.Section{{ID: "install-verify", Number: "1.1", Title: "Verifying", Level: 1}}) {
+		t.Errorf("structure = %+v %+v %+v %+v %+v", ch.Links(), ch.Images(), ch.Procedures(), ch.Admonitions(), ch.Sections())
 	}
 
 	md := c.Text(&ch)
@@ -382,8 +382,8 @@ func TestDocBookCorpus(t *testing.T) {
 	}
 
 	more := sles.Chapters[1]
-	if more.ID != "more" || more.Number != "2" || more.TopicType != "container" || more.Summary != "Container abstract." ||
-		!reflect.DeepEqual(more.Sections, []docparse.Section{{ID: "about", Number: "2.1", Title: "About the demo", Level: 1, File: "concepts/about.xml"}, {ID: "about-sec", Number: "2.1.1", Title: "Details", Level: 2}}) {
+	if more.ID != "more" || more.Number() != "2" || more.TopicType() != "container" || more.Summary != "Container abstract." ||
+		!reflect.DeepEqual(more.Sections(), []docparse.Section{{ID: "about", Number: "2.1", Title: "About the demo", Level: 1, File: "concepts/about.xml"}, {ID: "about-sec", Number: "2.1.1", Title: "Details", Level: 2}}) {
 		t.Errorf("container chapter = %+v", more)
 	}
 	if want := "## 2 More {#more}\n\nContainer abstract.\n\n### 2.1 About the demo {#about}\n\nThe CIB of SUSE Linux Enterprise Server.\n\n#### 2.1.1 Details {#about-sec}"; !strings.HasPrefix(c.Text(&more), want) {
@@ -511,23 +511,23 @@ func TestBookNumbering(t *testing.T) {
 	doc := c.Documents[0]
 	var got []string
 	for _, ch := range doc.Chapters {
-		got = append(got, ch.Number+" "+ch.Title)
+		got = append(got, ch.Number()+" "+ch.Title)
 	}
 	if want := []string{" About", "1 First", "2 Second", "A Extra", "1 Again first"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("chapters = %q, want %q", got, want)
 	}
 	pre, first, app := doc.Chapters[0], doc.Chapters[1], doc.Chapters[3]
-	if pre.Sections[0].Number != "1" || pre.RenderAs != "preface" {
+	if pre.Sections()[0].Number != "1" || pre.RenderAs() != "preface" {
 		t.Errorf("preface = %+v", pre)
 	}
-	if want := []docparse.Section{{ID: "c1-s1", Number: "1.1", Title: "One", Level: 1}, {ID: "c1-s1-1", Number: "1.1.1", Title: "Deep", Level: 2}, {ID: "c1-s2", Number: "1.2", Title: "Two", Level: 1}}; !reflect.DeepEqual(first.Sections, want) {
-		t.Errorf("sections = %+v", first.Sections)
+	if want := []docparse.Section{{ID: "c1-s1", Number: "1.1", Title: "One", Level: 1}, {ID: "c1-s1-1", Number: "1.1.1", Title: "Deep", Level: 2}, {ID: "c1-s2", Number: "1.2", Title: "Two", Level: 1}}; !reflect.DeepEqual(first.Sections(), want) {
+		t.Errorf("sections = %+v", first.Sections())
 	}
-	if first.Procedures[0].Number != "1.1" || first.Procedures[1].Number != "" {
-		t.Errorf("procedures = %+v", first.Procedures)
+	if first.Procedures()[0].Number != "1.1" || first.Procedures()[1].Number != "" {
+		t.Errorf("procedures = %+v", first.Procedures())
 	}
-	if app.Sections[0].Number != "A.1" {
-		t.Errorf("appendix sections = %+v", app.Sections)
+	if app.Sections()[0].Number != "A.1" {
+		t.Errorf("appendix sections = %+v", app.Sections())
 	}
 	md := c.Text(&first)
 	for _, want := range []string{"## 1 First {#c1}", "**Procedure 1.1: Doing**", "### 1.1 One {#c1-s1}", "**Figure 1.1: Pic**", "#### 1.1.1 Deep {#c1-s1-1}"} {

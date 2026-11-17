@@ -115,7 +115,7 @@ func (c *Corpus) Finish() {
 			// The chapter id navigates to the whole chapter.
 			c.xrefIndex[ch.ID] = append(c.xrefIndex[ch.ID], xrefLoc{docID: doc.ID, chapterID: ch.ID, title: ch.Title, scope: "chapter"})
 			// Each section id navigates to that section within the chapter.
-			for _, s := range ch.Sections {
+			for _, s := range ch.sections {
 				if s.ID == "" {
 					continue
 				}
@@ -143,9 +143,9 @@ func (c *Corpus) Finish() {
 // a dead reference is reported instead of silently dropped. Results are in the
 // order the chapter references them.
 func (c *Corpus) XrefTargets(docID string, ch *Chapter) []XrefTarget {
-	out := make([]XrefTarget, 0, len(ch.Xrefs))
+	out := make([]XrefTarget, 0, len(ch.xrefs))
 	seen := map[string]bool{}
-	for _, x := range ch.Xrefs {
+	for _, x := range ch.xrefs {
 		if seen[x.Linkend] {
 			continue
 		}

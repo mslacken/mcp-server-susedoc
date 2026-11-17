@@ -158,11 +158,9 @@ func (l *xmlLoader) buildDocBook(name string) (docparse.Document, []docparse.Glo
 	if asm.name != "assembly" && asm.name != "book" && asm.name != "article" && asm.name != "set" {
 		return docparse.Document{}, nil, nil, fmt.Errorf("%s is not an assembly or book", l.rel(asmPath))
 	}
-	doc := docparse.Document{
-		Chapters: []docparse.Chapter{},
-		Source:   &docparse.DocSource{DC: name, Assembly: l.rel(asmPath)},
-		Profile:  &docparse.Profile{OS: prof.os, Arch: prof.arch, Condition: prof.condition},
-	}
+	doc := docparse.Document{Chapters: []docparse.Chapter{}}
+	doc.SetSource(&docparse.DocSource{DC: name, Assembly: l.rel(asmPath)})
+	doc.SetProfile(&docparse.Profile{OS: prof.os, Arch: prof.arch, Condition: prof.condition})
 	var (
 		modules  []*dbModule
 		structID string
@@ -176,7 +174,7 @@ func (l *xmlLoader) buildDocBook(name string) (docparse.Document, []docparse.Glo
 			return docparse.Document{}, nil, nil, fmt.Errorf("%s has no structure", l.rel(asmPath))
 		}
 		structID = st.attr["id"]
-		doc.Source.Structure = structID
+		doc.Source().Structure = structID
 		resources := map[string]string{}
 		for _, rs := range asm.children("resources") {
 			for _, r := range rs.children("resource") {
@@ -192,7 +190,7 @@ func (l *xmlLoader) buildDocBook(name string) (docparse.Document, []docparse.Glo
 	default: // set, book, article
 		target := l.selectRoot(asm, rootID)
 		structID = target.attr["id"]
-		doc.Source.Structure = structID
+		doc.Source().Structure = structID
 		addSetMeta(&doc, target)
 		abstract = target.info("abstract")
 		modules = l.chaptersFromNode(target)
@@ -205,8 +203,8 @@ func (l *xmlLoader) buildDocBook(name string) (docparse.Document, []docparse.Glo
 			doc.Distro.Versions = []string{v}
 		}
 	}
-	if doc.Distro.Name == "" && doc.Bugtracker != nil {
-		doc.Distro.Name = reTrailingVersion.ReplaceAllString(doc.Bugtracker.Product, "")
+	if doc.Distro.Name == "" && doc.Bugtracker() != nil {
+		doc.Distro.Name = reTrailingVersion.ReplaceAllString(doc.Bugtracker().Product, "")
 	}
 	addProfileVersions(&doc.Distro, prof)
 
@@ -241,8 +239,8 @@ func (l *xmlLoader) buildDocBook(name string) (docparse.Document, []docparse.Glo
 			doc.Chapters = append(doc.Chapters, ch)
 		}
 	}
-	if doc.Summary == "" && doc.Meta != nil {
-		doc.Summary = doc.Meta.Description
+	if doc.Summary == "" && doc.Meta() != nil {
+		doc.Summary = doc.Meta().Description
 	}
 	if doc.Summary == "" && len(doc.Chapters) > 0 {
 		doc.Summary = doc.Chapters[0].Summary
@@ -282,30 +280,30 @@ var reVersion = regexp.MustCompile(`^\d+(?:\.\d+)+$`)
 
 // addAssemblyMeta fills the document metadata from the <merge> of the structure.
 func addAssemblyMeta(doc *docparse.Document, merge *xnode) {
-	doc.Meta = &docparse.DocMeta{}
+	meta := &docparse.DocMeta{}
 	doc.Title = merge.child("title").flatText()
-	doc.Subtitle = merge.child("subtitle").flatText()
+	doc.SetSubtitle(merge.child("subtitle").flatText())
 	for _, m := range merge.children("meta") {
 		text := firstNonEmpty(m.attr["content"], m.flatText())
 		switch m.attr["name"] {
 		case "maintainer":
-			doc.Meta.Maintainer = text
+			meta.Maintainer = text
 		case "series":
-			doc.Meta.Series = text
+			meta.Series = text
 		case "task":
-			doc.Meta.Tasks = phrases(m)
+			meta.Tasks = phrases(m)
 		case "category":
-			doc.Meta.Categories = phrases(m)
+			meta.Categories = phrases(m)
 		case "architecture":
-			doc.Meta.Architectures = phrases(m)
+			meta.Architectures = phrases(m)
 		case "updated":
-			doc.Meta.Updated = text
+			meta.Updated = text
 		case "title":
-			doc.Meta.Title = text
+			meta.Title = text
 		case "description":
-			doc.Meta.Description = text
+			meta.Description = text
 		case "social-descr":
-			doc.Meta.SocialDescription = text
+			meta.SocialDescription = text
 		case "productname":
 			for _, p := range m.find("productname") {
 				if doc.Distro.Name == "" {
@@ -318,25 +316,25 @@ func addAssemblyMeta(doc *docparse.Document, merge *xnode) {
 		}
 	}
 	if doc.Title == "" {
-		doc.Title = doc.Meta.Title
+		doc.Title = meta.Title
 	}
 	for _, rev := range merge.find("revision") {
-		doc.Revisions = append(doc.Revisions, docparse.Revision{
+		doc.AddRevision(docparse.Revision{
 			Date:        rev.child("date").flatText(),
 			Description: firstNonEmpty(rev.child("revdescription").flatText(), rev.child("revremark").flatText()),
 		})
 	}
 	if dm := merge.find("docmanager"); len(dm) > 0 {
 		if bt := dm[0].child("bugtracker"); bt != nil {
-			doc.Bugtracker = &docparse.Bugtracker{
+			doc.SetBugtracker(&docparse.Bugtracker{
 				URL: bt.child("url").flatText(), Component: bt.child("component").flatText(),
 				Product: bt.child("product").flatText(), Assignee: bt.child("assignee").flatText(),
-			}
+			})
 		}
-		doc.Translation = dm[0].child("translation").flatText()
+		doc.SetTranslation(dm[0].child("translation").flatText())
 	}
-	if reflect.DeepEqual(*doc.Meta, docparse.DocMeta{}) {
-		doc.Meta = nil
+	if !reflect.DeepEqual(*meta, docparse.DocMeta{}) {
+		doc.SetMeta(meta)
 	}
 }
 
@@ -589,10 +587,10 @@ func (l *xmlLoader) structModule(n *xnode) *dbModule {
 // addSetMeta fills the document metadata from the info of a set, book or
 // article.
 func addSetMeta(doc *docparse.Document, n *xnode) {
-	doc.Meta = &docparse.DocMeta{}
+	meta := &docparse.DocMeta{}
 	doc.Title = n.titleNode().flatText()
 	if s := n.child("subtitle"); s != nil {
-		doc.Subtitle = s.flatText()
+		doc.SetSubtitle(s.flatText())
 	}
 	info := n.child("info")
 	if info == nil {
@@ -602,23 +600,23 @@ func addSetMeta(doc *docparse.Document, n *xnode) {
 		text := firstNonEmpty(m.attr["content"], m.flatText())
 		switch m.attr["name"] {
 		case "maintainer":
-			doc.Meta.Maintainer = text
+			meta.Maintainer = text
 		case "series":
-			doc.Meta.Series = text
+			meta.Series = text
 		case "task":
-			doc.Meta.Tasks = phrases(m)
+			meta.Tasks = phrases(m)
 		case "category":
-			doc.Meta.Categories = phrases(m)
+			meta.Categories = phrases(m)
 		case "architecture":
-			doc.Meta.Architectures = phrases(m)
+			meta.Architectures = phrases(m)
 		case "updated":
-			doc.Meta.Updated = text
+			meta.Updated = text
 		case "title":
-			doc.Meta.Title = text
+			meta.Title = text
 		case "description":
-			doc.Meta.Description = text
+			meta.Description = text
 		case "social-descr":
-			doc.Meta.SocialDescription = text
+			meta.SocialDescription = text
 		case "productname":
 			for _, p := range m.find("productname") {
 				if doc.Distro.Name == "" {
@@ -640,25 +638,25 @@ func addSetMeta(doc *docparse.Document, n *xnode) {
 		}
 	}
 	if doc.Title == "" {
-		doc.Title = doc.Meta.Title
+		doc.Title = meta.Title
 	}
 	for _, rev := range info.find("revision") {
-		doc.Revisions = append(doc.Revisions, docparse.Revision{
+		doc.AddRevision(docparse.Revision{
 			Date:        rev.child("date").flatText(),
 			Description: firstNonEmpty(rev.child("revdescription").flatText(), rev.child("revremark").flatText()),
 		})
 	}
 	if dm := info.find("docmanager"); len(dm) > 0 {
 		if bt := dm[0].child("bugtracker"); bt != nil {
-			doc.Bugtracker = &docparse.Bugtracker{
+			doc.SetBugtracker(&docparse.Bugtracker{
 				URL: bt.child("url").flatText(), Component: bt.child("component").flatText(),
 				Product: bt.child("product").flatText(), Assignee: bt.child("assignee").flatText(),
-			}
+			})
 		}
-		doc.Translation = dm[0].child("translation").flatText()
+		doc.SetTranslation(dm[0].child("translation").flatText())
 	}
-	if reflect.DeepEqual(*doc.Meta, docparse.DocMeta{}) {
-		doc.Meta = nil
+	if !reflect.DeepEqual(*meta, docparse.DocMeta{}) {
+		doc.SetMeta(meta)
 	}
 }
 
