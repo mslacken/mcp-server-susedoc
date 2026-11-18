@@ -12,10 +12,12 @@ builds:
 
 archives:
   - formats: [tar.gz]
-    files: [README.md]
+    wrap_in_directory: true
+    files: [README.md, LICENSE]
 
 source:
   enabled: true
+  prefix_template: "{{ .ProjectName }}-{{ .Version }}/"
 
 checksum:
   name_template: checksums.txt
