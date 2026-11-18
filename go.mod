@@ -7,7 +7,7 @@ require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/hbollon/go-edlib v1.7.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.25.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
