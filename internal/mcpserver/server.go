@@ -258,20 +258,6 @@ func CreateSearchDocsSchema(c *docparse.Corpus) *jsonschema.Schema {
 	return schema
 }
 
-// CreateDefineTermSchema returns the input schema for define_term with term
-// restricted to the glossary terms present in the corpus.
-func CreateDefineTermSchema(c *docparse.Corpus) *jsonschema.Schema {
-	schema, _ := jsonschema.For[defineTermIn](nil)
-	if schema != nil {
-		terms := make([]string, 0, len(c.Glossary))
-		for _, e := range c.GlossaryEntries() {
-			terms = append(terms, e.Term)
-		}
-		setEnum(schema, "term", terms)
-	}
-	return schema
-}
-
 // NewServer builds the MCP server exposing the corpus' documents.
 func NewServer(c *docparse.Corpus) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "mcp-server-susedoc", Version: "0.1.0"}, &mcp.ServerOptions{
@@ -326,7 +312,6 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "define_term",
 		Description: "Look up a term or abbreviation in the glossary.",
-		InputSchema: CreateDefineTermSchema(c),
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in defineTermIn) (*mcp.CallToolResult, DefineTermOut, error) {
 		debugf("define_term term=%q docs=%q", in.Term, in.Docs)
 		out := DefineTerm(c, in.Term, in.Docs)

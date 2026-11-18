@@ -174,13 +174,22 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 	hidden := []string{"source", "profile", "subtitle", "meta", "revisions", "bugtracker", "translation",
 		"topic_type", "render_as", "maintainer", "legacy_sources", "sections", "procedures", "admonitions",
 		"xrefs", "links", "images", "includes"}
-	dump, err := json.Marshal(c)
+	// the format specific extras are not serialized with the corpus, so
+	// marshal them alongside the documents to see that the parser filled them
+	var extras []any
+	for _, d := range c.Documents {
+		extras = append(extras, d.Extras)
+		for _, ch := range d.Chapters {
+			extras = append(extras, ch.Extra)
+		}
+	}
+	dump, err := json.Marshal(map[string]any{"documents": c.Documents, "extras": extras})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, k := range hidden {
 		if !strings.Contains(string(dump), `"`+k+`":`) {
-			t.Errorf("CLI dump lacks %q", k)
+			t.Errorf("parsed corpus lacks %q", k)
 		}
 	}
 
@@ -223,7 +232,7 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 			t.Errorf("MCP output exposes %q", k)
 		}
 	}
-	for _, want := range []string{"sudo zypper in demo", "Demo Server", "The configuration.", "## Install {#task}"} {
+	for _, want := range []string{"sudo zypper in demo", "Demo Server", "The configuration.", "## 1 Install {#task}"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("MCP output lacks %q", want)
 		}
