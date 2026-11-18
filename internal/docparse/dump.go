@@ -2,14 +2,18 @@ package docparse
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
 	"mcp-server-susedoc/internal/debug"
+
+	"golang.org/x/sync/errgroup"
 )
 
 var debugf = debug.New("docparse")
@@ -64,25 +68,37 @@ func (c *Corpus) Export(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	// every document gets its own slot, so all failures are reported and not
+	// just the first one, as errgroup would do
+	errs := make([]error, len(c.Documents))
+	var g errgroup.Group
+	// bound the number of files open at once
+	g.SetLimit(runtime.GOMAXPROCS(0))
 	for i := range c.Documents {
 		d := &c.Documents[i]
 		if d.ID == "" || d.ID != filepath.Base(d.ID) || strings.HasPrefix(d.ID, ".") {
-			return fmt.Errorf("document id %q is not usable as file name", d.ID)
+			errs[i] = fmt.Errorf("document id %q is not usable as file name", d.ID)
+			continue
 		}
-		f, err := os.Create(filepath.Join(dir, d.ID+".json"))
-		if err != nil {
-			return err
-		}
-		debugf("dumping %s", d.ID)
-		err = c.DumpDocument(f, d)
-		if cerr := f.Close(); err == nil {
-			err = cerr
-		}
-		if err != nil {
-			return err
-		}
+		g.Go(func() error {
+			f, err := os.Create(filepath.Join(dir, d.ID+".json"))
+			if err != nil {
+				errs[i] = err
+				return nil
+			}
+			debugf("dumping %s", d.ID)
+			err = c.DumpDocument(f, d)
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+			if err != nil {
+				errs[i] = fmt.Errorf("%s: %w", d.ID, err)
+			}
+			return nil
+		})
 	}
-	return nil
+	_ = g.Wait()
+	return errors.Join(errs...)
 }
 
 // DumpDocument writes the document d of the corpus to w in the dump format,
