@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	rdebug "runtime/debug"
 	"sort"
 	"strings"
 
@@ -258,9 +259,23 @@ func CreateSearchDocsSchema(c *docparse.Corpus) *jsonschema.Schema {
 	return schema
 }
 
+// Version is reported to MCP clients and by -version. Release builds set it
+// with -ldflags "-X mcp-server-susedoc/internal/mcpserver.Version=v1.2.3";
+// otherwise the module version from `go install ...@v1.2.3` is used.
+var Version = "dev"
+
+func init() {
+	if Version != "dev" {
+		return
+	}
+	if bi, ok := rdebug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		Version = bi.Main.Version
+	}
+}
+
 // NewServer builds the MCP server exposing the corpus' documents.
 func NewServer(c *docparse.Corpus) *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "mcp-server-susedoc", Version: "0.1.0"}, &mcp.ServerOptions{
+	srv := mcp.NewServer(&mcp.Implementation{Name: "mcp-server-susedoc", Version: Version}, &mcp.ServerOptions{
 		Instructions: "Product documentation. Use search_docs or list_documents to find a document, " +
 			"read_document to get its table of contents or a chapter, find_command to find where a " +
 			"command is documented and define_term for the glossary.",

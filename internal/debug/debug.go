@@ -41,7 +41,7 @@ func Printf(component, format string, args ...any) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	fmt.Fprintf(out, "[debug] "+component+": "+format+"\n", args...)
+	_, _ = fmt.Fprintf(out, "[debug] "+component+": "+format+"\n", args...)
 }
 
 // New returns a printf style function bound to component, meant to be kept

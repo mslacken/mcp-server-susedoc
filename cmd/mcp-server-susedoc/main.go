@@ -63,7 +63,13 @@ func main() {
 	web := flag.Bool("web", false, "serve the documents as a small web interface")
 	port := flag.Int("port", 8080, "port the web interface listens on (with -web)")
 	debugFlag := flag.Bool("debug", false, "log tool calls, web requests and DocBook parsing problems to stderr")
+	showVersion := flag.Bool("version", false, "print the version and exit")
+	flag.BoolVar(showVersion, "v", false, "shorthand for -version")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(mcpserver.Version)
+		return
+	}
 	debug.SetEnabled(*debugFlag)
 	files = append(files, flag.Args()...)
 
