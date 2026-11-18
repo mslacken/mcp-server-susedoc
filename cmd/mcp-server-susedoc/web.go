@@ -265,7 +265,7 @@ func (a *webApp) renderPage(w http.ResponseWriter, p page) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	b.WriteTo(w)
+	_, _ = b.WriteTo(w)
 }
 
 // toolPage serves the page of tool, called with the request's arguments.

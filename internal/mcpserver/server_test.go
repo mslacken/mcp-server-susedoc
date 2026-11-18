@@ -193,7 +193,7 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cs.Close()
+	defer func() { _ = cs.Close() }()
 	var outputs []string
 	for name, args := range map[string]map[string]any{
 		"list_documents": {"product": "Demo Server", "version": "1.0"},

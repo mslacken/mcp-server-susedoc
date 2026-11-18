@@ -60,7 +60,7 @@ func readDC(p string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	vars := map[string]string{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
@@ -159,8 +159,11 @@ func (l *xmlLoader) buildDocBook(name string) (docparse.Document, []docparse.Glo
 		return docparse.Document{}, nil, nil, fmt.Errorf("%s is not an assembly or book", l.rel(asmPath))
 	}
 	doc := docparse.Document{Chapters: []docparse.Chapter{}}
-	doc.SetSource(&docparse.DocSource{DC: name, Assembly: l.rel(asmPath)})
-	doc.SetProfile(&docparse.Profile{OS: prof.os, Arch: prof.arch, Condition: prof.condition})
+	extra := &DocExtra{
+		Source:  &DocSource{DC: name, Assembly: l.rel(asmPath)},
+		Profile: &Profile{OS: prof.os, Arch: prof.arch, Condition: prof.condition},
+	}
+	doc.Extras = extra
 	var (
 		modules  []*dbModule
 		structID string
@@ -174,7 +177,7 @@ func (l *xmlLoader) buildDocBook(name string) (docparse.Document, []docparse.Glo
 			return docparse.Document{}, nil, nil, fmt.Errorf("%s has no structure", l.rel(asmPath))
 		}
 		structID = st.attr["id"]
-		doc.Source().Structure = structID
+		extra.Source.Structure = structID
 		resources := map[string]string{}
 		for _, rs := range asm.children("resources") {
 			for _, r := range rs.children("resource") {
@@ -184,14 +187,14 @@ func (l *xmlLoader) buildDocBook(name string) (docparse.Document, []docparse.Glo
 			}
 		}
 		merge := st.child("merge")
-		addAssemblyMeta(&doc, merge)
+		addAssemblyMeta(&doc, extra, merge)
 		modules = l.modules(st, resources, prof)
 		abstract = merge.child("abstract")
 	default: // set, book, article
 		target := l.selectRoot(asm, rootID)
 		structID = target.attr["id"]
-		doc.Source().Structure = structID
-		addSetMeta(&doc, target)
+		extra.Source.Structure = structID
+		addSetMeta(&doc, extra, target)
 		abstract = target.info("abstract")
 		modules = l.chaptersFromNode(target)
 	}
@@ -203,8 +206,8 @@ func (l *xmlLoader) buildDocBook(name string) (docparse.Document, []docparse.Glo
 			doc.Distro.Versions = []string{v}
 		}
 	}
-	if doc.Distro.Name == "" && doc.Bugtracker() != nil {
-		doc.Distro.Name = reTrailingVersion.ReplaceAllString(doc.Bugtracker().Product, "")
+	if doc.Distro.Name == "" && extra.Bugtracker != nil {
+		doc.Distro.Name = reTrailingVersion.ReplaceAllString(extra.Bugtracker.Product, "")
 	}
 	addProfileVersions(&doc.Distro, prof)
 
@@ -232,15 +235,16 @@ func (l *xmlLoader) buildDocBook(name string) (docparse.Document, []docparse.Glo
 			if len(lines) > 0 {
 				lines = append(lines, "")
 			}
-			ch, text := r.chapter(m, len(lines))
+			ch, chExtra, text := r.chapter(m, len(lines))
 			lines = append(lines, text...)
 			ch.ID = docparse.UniqueID(chapterIDs, firstNonEmpty(m.id, docparse.Slug(m.title)))
 			ch.LinesKey = l.linesKey(name)
+			ch.Extra = chExtra
 			doc.Chapters = append(doc.Chapters, ch)
 		}
 	}
-	if doc.Summary == "" && doc.Meta() != nil {
-		doc.Summary = doc.Meta().Description
+	if doc.Summary == "" && extra.Meta != nil {
+		doc.Summary = extra.Meta.Description
 	}
 	if doc.Summary == "" && len(doc.Chapters) > 0 {
 		doc.Summary = doc.Chapters[0].Summary
@@ -279,10 +283,10 @@ var reTrailingVersion = regexp.MustCompile(`\s+\d+(?:\.\d+)*(?:\s+SP\d+)?$`)
 var reVersion = regexp.MustCompile(`^\d+(?:\.\d+)+$`)
 
 // addAssemblyMeta fills the document metadata from the <merge> of the structure.
-func addAssemblyMeta(doc *docparse.Document, merge *xnode) {
-	meta := &docparse.DocMeta{}
+func addAssemblyMeta(doc *docparse.Document, extra *DocExtra, merge *xnode) {
+	meta := &DocMeta{}
 	doc.Title = merge.child("title").flatText()
-	doc.SetSubtitle(merge.child("subtitle").flatText())
+	extra.Subtitle = merge.child("subtitle").flatText()
 	for _, m := range merge.children("meta") {
 		text := firstNonEmpty(m.attr["content"], m.flatText())
 		switch m.attr["name"] {
@@ -319,22 +323,22 @@ func addAssemblyMeta(doc *docparse.Document, merge *xnode) {
 		doc.Title = meta.Title
 	}
 	for _, rev := range merge.find("revision") {
-		doc.AddRevision(docparse.Revision{
+		extra.Revisions = append(extra.Revisions, Revision{
 			Date:        rev.child("date").flatText(),
 			Description: firstNonEmpty(rev.child("revdescription").flatText(), rev.child("revremark").flatText()),
 		})
 	}
 	if dm := merge.find("docmanager"); len(dm) > 0 {
 		if bt := dm[0].child("bugtracker"); bt != nil {
-			doc.SetBugtracker(&docparse.Bugtracker{
+			extra.Bugtracker = &Bugtracker{
 				URL: bt.child("url").flatText(), Component: bt.child("component").flatText(),
 				Product: bt.child("product").flatText(), Assignee: bt.child("assignee").flatText(),
-			})
+			}
 		}
-		doc.SetTranslation(dm[0].child("translation").flatText())
+		extra.Translation = dm[0].child("translation").flatText()
 	}
-	if !reflect.DeepEqual(*meta, docparse.DocMeta{}) {
-		doc.SetMeta(meta)
+	if !reflect.DeepEqual(*meta, DocMeta{}) {
+		extra.Meta = meta
 	}
 }
 
@@ -586,11 +590,11 @@ func (l *xmlLoader) structModule(n *xnode) *dbModule {
 
 // addSetMeta fills the document metadata from the info of a set, book or
 // article.
-func addSetMeta(doc *docparse.Document, n *xnode) {
-	meta := &docparse.DocMeta{}
+func addSetMeta(doc *docparse.Document, extra *DocExtra, n *xnode) {
+	meta := &DocMeta{}
 	doc.Title = n.titleNode().flatText()
 	if s := n.child("subtitle"); s != nil {
-		doc.SetSubtitle(s.flatText())
+		extra.Subtitle = s.flatText()
 	}
 	info := n.child("info")
 	if info == nil {
@@ -641,22 +645,22 @@ func addSetMeta(doc *docparse.Document, n *xnode) {
 		doc.Title = meta.Title
 	}
 	for _, rev := range info.find("revision") {
-		doc.AddRevision(docparse.Revision{
+		extra.Revisions = append(extra.Revisions, Revision{
 			Date:        rev.child("date").flatText(),
 			Description: firstNonEmpty(rev.child("revdescription").flatText(), rev.child("revremark").flatText()),
 		})
 	}
 	if dm := info.find("docmanager"); len(dm) > 0 {
 		if bt := dm[0].child("bugtracker"); bt != nil {
-			doc.SetBugtracker(&docparse.Bugtracker{
+			extra.Bugtracker = &Bugtracker{
 				URL: bt.child("url").flatText(), Component: bt.child("component").flatText(),
 				Product: bt.child("product").flatText(), Assignee: bt.child("assignee").flatText(),
-			})
+			}
 		}
-		doc.SetTranslation(dm[0].child("translation").flatText())
+		extra.Translation = dm[0].child("translation").flatText()
 	}
-	if !reflect.DeepEqual(*meta, docparse.DocMeta{}) {
-		doc.SetMeta(meta)
+	if !reflect.DeepEqual(*meta, DocMeta{}) {
+		extra.Meta = meta
 	}
 }
 

@@ -1,6 +1,7 @@
 package docparse
 
 import (
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -42,6 +43,16 @@ type Part struct {
 	Documents []Document
 	Glossary  []GlossaryEntry
 	Lines     map[string][]string // see Corpus.AddLines
+}
+
+// Merge appends the documents, glossary and lines of q to p.
+func (p *Part) Merge(q Part) {
+	p.Documents = append(p.Documents, q.Documents...)
+	p.Glossary = append(p.Glossary, q.Glossary...)
+	if p.Lines == nil {
+		p.Lines = map[string][]string{}
+	}
+	maps.Copy(p.Lines, q.Lines)
 }
 
 // NewCorpus returns an empty corpus for a parser to fill with AddLines,
@@ -115,7 +126,7 @@ func (c *Corpus) Finish() {
 			// The chapter id navigates to the whole chapter.
 			c.xrefIndex[ch.ID] = append(c.xrefIndex[ch.ID], xrefLoc{docID: doc.ID, chapterID: ch.ID, title: ch.Title, scope: "chapter"})
 			// Each section id navigates to that section within the chapter.
-			for _, s := range ch.sections {
+			for _, s := range ch.Sections {
 				if s.ID == "" {
 					continue
 				}
@@ -143,9 +154,9 @@ func (c *Corpus) Finish() {
 // a dead reference is reported instead of silently dropped. Results are in the
 // order the chapter references them.
 func (c *Corpus) XrefTargets(docID string, ch *Chapter) []XrefTarget {
-	out := make([]XrefTarget, 0, len(ch.xrefs))
+	out := make([]XrefTarget, 0, len(ch.Xrefs))
 	seen := map[string]bool{}
-	for _, x := range ch.xrefs {
+	for _, x := range ch.Xrefs {
 		if seen[x.Linkend] {
 			continue
 		}

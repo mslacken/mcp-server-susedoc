@@ -1,4 +1,4 @@
-// Package loader reads a corpus from a list of files, each with the parser
+// Package loader reads a corpus from a list of files, each with the importer
 // matching its type: DocBook assemblies published through DC files, markdown
 // files and plain text files.
 package loader
@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -16,56 +15,51 @@ import (
 	"mcp-server-susedoc/internal/docparse/docbook"
 	"mcp-server-susedoc/internal/docparse/markdown"
 	"mcp-server-susedoc/internal/docparse/text"
-	"mcp-server-susedoc/internal/mcpserver"
 )
 
-// DocType is the format of an input file.
-type DocType int
+// Debug enables diagnostic output on stderr while loading documents.
+var Debug bool
 
-const (
-	DocBook  DocType = iota // DC file of a DocBook assembly
-	Markdown                // markdown file
-	Text                    // plain text file
-)
+func debugf(format string, args ...any) {
+	if Debug {
+		fmt.Fprintf(os.Stderr, "[debug] loader: "+format+"\n", args...)
+	}
+}
 
-// DocFile is an input file. Root is the directory the file was found in, or
-// "" if it was named directly. DocBook files are resolved relative to their
-// own directory, which all DC files in it share.
+// Importers are the formats files are read as, tried in order.
+var Importers = []docparse.Importer{docbook.Importer{}, markdown.Importer{}, text.Importer{}}
+
+// DocFile is an input file and the importer that reads it.
 type DocFile struct {
-	Path string
-	Root string
-	Type DocType
+	docparse.Source
+	Importer docparse.Importer
 }
 
-// TypeOf returns the type of the file p by its name: DC-* files are DocBook,
-// *.md markdown and *.txt plain text. ok is false for anything else.
-func TypeOf(p string) (t DocType, ok bool) {
-	switch ext := strings.ToLower(filepath.Ext(p)); {
-	case docbook.IsDCFile(p):
-		return DocBook, true
-	case ext == ".md" || ext == ".markdown":
-		return Markdown, true
-	case ext == ".txt" || ext == ".text":
-		return Text, true
+// importerFor returns the first of Importers that matches p, or nil.
+func importerFor(p string) docparse.Importer {
+	for _, imp := range Importers {
+		if imp.Match(p) {
+			return imp
+		}
 	}
-	return 0, false
+	return nil
 }
 
-// File returns the input file p, named directly. Files TypeOf does not
-// recognize are read as markdown.
+// File returns the input file p, named directly. Files no importer matches
+// are read as markdown.
 func File(p string) DocFile {
-	t, ok := TypeOf(p)
-	if !ok {
-		t = Markdown
+	imp := importerFor(p)
+	if imp == nil {
+		imp = markdown.Importer{}
 	}
-	return DocFile{Path: p, Type: t}
+	return DocFile{Source: docparse.Source{Path: p}, Importer: imp}
 }
 
-// Find returns the files below dir that TypeOf recognizes. A directory with
-// DC files at its top level is a DocBook corpus: only its DC files are taken
-// and it is not descended into, as its topics are read through the DC files
-// and its l10n/ copies are generated. Hidden directories are skipped. If dir
-// is a file, it is returned as File does.
+// Find returns the files below dir that an importer matches. A directory with
+// entry files of a DirImporter (like the DC files of a DocBook corpus) yields
+// just those and is not descended into, as its other files are read through
+// them. Hidden directories are skipped. If dir is a file, it is returned as
+// File does.
 func Find(dir string) ([]DocFile, error) {
 	st, err := os.Stat(dir)
 	if err != nil {
@@ -83,117 +77,70 @@ func Find(dir string) ([]DocFile, error) {
 			if p != dir && strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
 			}
-			if dcs := docbook.DCFiles(p); len(dcs) > 0 {
-				for _, name := range dcs {
-					out = append(out, DocFile{Path: filepath.Join(p, name), Root: dir, Type: DocBook})
+			for _, imp := range Importers {
+				di, ok := imp.(docparse.DirImporter)
+				if !ok {
+					continue
 				}
-				return filepath.SkipDir
+				if entries := di.EntryFiles(p); len(entries) > 0 {
+					for _, e := range entries {
+						out = append(out, DocFile{Source: docparse.Source{Path: e, Root: dir}, Importer: imp})
+					}
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}
-		if t, ok := TypeOf(p); ok && t != DocBook {
-			out = append(out, DocFile{Path: p, Root: dir, Type: t})
+		if imp := importerFor(p); imp != nil {
+			if _, ok := imp.(docparse.DirImporter); !ok {
+				out = append(out, DocFile{Source: docparse.Source{Path: p, Root: dir}, Importer: imp})
+			}
 		}
 		return nil
 	})
 	return out, err
 }
 
-// result is what was read from one file.
-type result struct {
-	part docparse.Part
-	segs []markdown.Segment // markdown files are grouped into documents later
-	err  error
-}
-
-// Load reads files in parallel and builds the corpus from them. DocBook
-// files in the same directory share one docbook.Loader, so that common topics
-// and entity files are parsed once. The corpus is then filled in file order,
-// so that the document order and the first definition winning for a glossary
-// term stay deterministic, and finally its indexes are built. Unreadable files
-// are skipped with a warning; it is an error if no document is left.
+// Load hands the files to their importers, which run in parallel, and builds
+// the corpus from what they read. The part of each importer goes where its
+// first file is, so that the document order and the first definition winning
+// for a glossary term stay deterministic. Unreadable files are skipped with a
+// warning; it is an error if no document is left.
 func Load(files []DocFile) (*docparse.Corpus, error) {
-	xml := map[string]*docbook.Loader{}
+	var order []docparse.Importer
+	sources := map[string][]docparse.Source{}
 	for _, f := range files {
-		if dir := filepath.Dir(f.Path); f.Type == DocBook && xml[dir] == nil {
-			xml[dir] = docbook.NewLoader(dir)
+		name := f.Importer.Name()
+		if _, ok := sources[name]; !ok {
+			order = append(order, f.Importer)
 		}
+		sources[name] = append(sources[name], f.Source)
 	}
-	results := doRead(files, xml)
-	mcpserver.Debugf("Read: %d files", len(results))
 
-	c := newCorpus(files, results)
+	parts := make([]docparse.Part, len(order))
+	errs := make([]error, len(order))
+	var wg sync.WaitGroup
+	for i, imp := range order {
+		wg.Go(func() {
+			srcs := sources[imp.Name()]
+			debugf("importing %d %s files", len(srcs), imp.Name())
+			parts[i], errs[i] = imp.Import(srcs)
+		})
+	}
+	wg.Wait()
+
+	c := docparse.NewCorpus()
+	for i := range order {
+		if errs[i] != nil {
+			fmt.Fprintln(os.Stderr, errs[i])
+		}
+		c.Add(parts[i])
+	}
 	if len(c.Documents) == 0 {
 		return nil, fmt.Errorf("no usable documents found")
 	}
-	mcpserver.Debugf("Created corpus")
+	debugf("created corpus")
 	c.Finish()
-	mcpserver.Debugf("Finished")
+	debugf("finished")
 	return c, nil
-}
-
-// doRead reads all the files in parallel and returns one result each, in file
-// order.
-func doRead(files []DocFile, xml map[string]*docbook.Loader) []result {
-	results := make([]result, len(files))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	for range runtime.GOMAXPROCS(0) {
-		wg.Go(func() {
-			for i := range jobs {
-				results[i] = read(files[i], xml)
-			}
-		})
-	}
-	for i := range files {
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
-	return results
-}
-
-// newCorpus fills a new corpus with the results in file order, so that the
-// document order and the first definition winning for a glossary term stay
-// deterministic.
-func newCorpus(files []DocFile, results []result) *docparse.Corpus {
-	var segs []markdown.Segment
-	for i, r := range results {
-		if r.err != nil {
-			fmt.Fprintf(os.Stderr, "skipping %s: %v\n", files[i].Path, r.err)
-			continue
-		}
-		segs = append(segs, r.segs...)
-	}
-	c := docparse.NewCorpus()
-	mdAdded := false
-	for i, r := range results {
-		if r.err != nil {
-			continue
-		}
-		// the markdown documents go where the first markdown file is
-		if files[i].Type == Markdown && !mdAdded {
-			c.Add(markdown.Build(segs))
-			mdAdded = true
-		}
-		c.Add(r.part)
-	}
-	return c
-}
-
-// read reads the file f with the parser for its type.
-func read(f DocFile, xml map[string]*docbook.Loader) result {
-	mcpserver.Debugf("Reading file: %s", f.Path)
-	switch f.Type {
-	case DocBook:
-		p, err := xml[filepath.Dir(f.Path)].Read(filepath.Base(f.Path))
-		return result{part: p, err: err}
-	case Markdown:
-		segs, err := markdown.ReadFile(f.Path, f.Root)
-		return result{segs: segs, err: err}
-	case Text:
-		p, err := text.ReadFile(f.Path)
-		return result{part: p, err: err}
-	}
-	return result{err: fmt.Errorf("unknown document type %d", f.Type)}
 }
