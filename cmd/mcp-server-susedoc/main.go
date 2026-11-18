@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"os"
 
+	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
-	"mcp-server-susedoc/internal/docparse/docbook"
 	"mcp-server-susedoc/internal/docparse/loader"
 	"mcp-server-susedoc/internal/docparse/markdown"
 	"mcp-server-susedoc/internal/mcpserver"
@@ -33,8 +33,6 @@ func printCorpus(c *docparse.Corpus, asJSON bool) {
 	}
 	fmt.Print(string(enc))
 }
-
-var debug bool
 
 // defaultImportDir is the FHS location packaged exports are installed to,
 // usually one subdirectory per package holding its <id>.json document files.
@@ -66,10 +64,7 @@ func main() {
 	port := flag.Int("port", 8080, "port the web interface listens on (with -web)")
 	debugFlag := flag.Bool("debug", false, "log tool calls, web requests and DocBook parsing problems to stderr")
 	flag.Parse()
-	debug = *debugFlag
-	mcpserver.Debug = debug
-	docbook.Debug = debug
-	loader.Debug = debug
+	debug.SetEnabled(*debugFlag)
 	files = append(files, flag.Args()...)
 
 	if *tree {
@@ -119,10 +114,8 @@ func main() {
 				fmt.Fprintln(os.Stderr, "error importing corpus:", err)
 				os.Exit(1)
 			}
-			if debug {
-				for _, name := range imported {
-					fmt.Fprintf(os.Stderr, "imported %s\n", name)
-				}
+			for _, name := range imported {
+				debug.Printf("main", "imported %s", name)
 			}
 		}
 		if len(corpus.Documents) == 0 {

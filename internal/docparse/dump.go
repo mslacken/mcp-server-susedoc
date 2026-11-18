@@ -8,7 +8,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"mcp-server-susedoc/internal/debug"
 )
+
+var debugf = debug.New("docparse")
 
 // DumpVersion is the version of the dump format, for future compatibility.
 // Version 1 held the whole corpus in one file, version 2 holds one document
@@ -69,7 +73,7 @@ func (c *Corpus) Export(dir string) error {
 		if err != nil {
 			return err
 		}
-		// mcpserver.Debugf("dumping: %s", d.ID)
+		debugf("dumping %s", d.ID)
 		err = c.DumpDocument(f, d)
 		if cerr := f.Close(); err == nil {
 			err = cerr

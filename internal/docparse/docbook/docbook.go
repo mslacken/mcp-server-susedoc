@@ -17,17 +17,11 @@ import (
 	"sort"
 	"strings"
 
+	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
 )
 
-// Debug enables diagnostic output on stderr while loading documents.
-var Debug bool
-
-func debugf(format string, args ...any) {
-	if Debug {
-		fmt.Fprintf(os.Stderr, "[debug] docbook: "+format+"\n", args...)
-	}
-}
+var debugf = debug.New("docbook")
 
 // warnf reports content that is dropped, like the "skipping combined file"
 // message of the markdown loader.

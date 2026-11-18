@@ -4,23 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
+	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-var Debug bool
-
-func Debugf(format string, args ...any) {
-	if Debug {
-		fmt.Fprintf(os.Stderr, "[debug] tool: "+format+"\n", args...)
-	}
-}
+var debugf = debug.New("tool")
 
 type listDocumentsIn struct {
 	Product string `json:"product,omitempty" jsonschema:"only documents whose product contains this text, e.g. 'Register Product'"`
@@ -291,7 +285,7 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 		Description: "List the available documents (guides) with id, title, summary and product versions.",
 		InputSchema: CreateListDocumentsSchema(c),
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in listDocumentsIn) (*mcp.CallToolResult, ListDocumentsOut, error) {
-		Debugf("list_documents product=%q version=%q", in.Product, in.Version)
+		debugf("list_documents product=%q version=%q", in.Product, in.Version)
 		return nil, ListDocuments(c, in.Product, in.Version), nil
 	})
 
@@ -302,9 +296,9 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 			"and where the chapter's cross references point to (unresolved ones are reported as dead), " +
 			"without the table of contents.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in readDocumentIn) (*mcp.CallToolResult, ReadDocumentOut, error) {
-		Debugf("read_document doc_id=%q chapter_id=%q", in.DocID, in.ChapterID)
+		debugf("read_document doc_id=%q chapter_id=%q", in.DocID, in.ChapterID)
 		out, err := BuildReadDocument(c, in.DocID, in.ChapterID)
-		Debugf("read_document result: %d toc entries, chapter=%v err=%v", len(out.TOC), out.Chapter != nil, err)
+		debugf("read_document result: %d toc entries, chapter=%v err=%v", len(out.TOC), out.Chapter != nil, err)
 		return nil, out, err
 	})
 
@@ -313,9 +307,9 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 		Description: "Full text search over all chapters. Returns ranked hits with doc_id and chapter_id for read_document.",
 		InputSchema: CreateSearchDocsSchema(c),
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in searchDocsIn) (*mcp.CallToolResult, SearchDocsOut, error) {
-		Debugf("search_docs query=%q product=%q version=%q scope=%q limit=%d fuzzy=%d regex=%v docs=%q", in.Query, in.Product, in.Version, in.Scope, in.Limit, in.Fuzzy, in.Regex, in.Docs)
+		debugf("search_docs query=%q product=%q version=%q scope=%q limit=%d fuzzy=%d regex=%v docs=%q", in.Query, in.Product, in.Version, in.Scope, in.Limit, in.Fuzzy, in.Regex, in.Docs)
 		out := SearchDocs(c, in.Query, in.Product, in.Version, in.Scope, in.Limit, in.Fuzzy, in.Regex, in.Docs)
-		Debugf("search_docs result: %d hits", len(out.Hits))
+		debugf("search_docs result: %d hits", len(out.Hits))
 		return nil, out, nil
 	})
 
@@ -323,9 +317,9 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 		Name:        "find_command",
 		Description: "Find the documented shell commands containing all given words and the chapters showing them.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in findCommandIn) (*mcp.CallToolResult, FindCommandOut, error) {
-		Debugf("find_command pattern=%q docs=%q", in.Pattern, in.Docs)
+		debugf("find_command pattern=%q docs=%q", in.Pattern, in.Docs)
 		out := FindCommand(c, in.Pattern, in.Docs)
-		Debugf("find_command result: %d commands", len(out.Commands))
+		debugf("find_command result: %d commands", len(out.Commands))
 		return nil, out, nil
 	})
 
@@ -334,9 +328,9 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 		Description: "Look up a term or abbreviation in the glossary.",
 		InputSchema: CreateDefineTermSchema(c),
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in defineTermIn) (*mcp.CallToolResult, DefineTermOut, error) {
-		Debugf("define_term term=%q docs=%q", in.Term, in.Docs)
+		debugf("define_term term=%q docs=%q", in.Term, in.Docs)
 		out := DefineTerm(c, in.Term, in.Docs)
-		Debugf("define_term result: %d entries", len(out.Entries))
+		debugf("define_term result: %d entries", len(out.Entries))
 		return nil, out, nil
 	})
 

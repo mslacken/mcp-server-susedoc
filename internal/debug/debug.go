@@ -1,0 +1,55 @@
+// Package debug provides the diagnostic output shared by all packages. It
+// imports nothing from this module, so every package can use it without
+// creating import cycles.
+package debug
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"sync"
+	"sync/atomic"
+)
+
+var (
+	enabled atomic.Bool
+	mu      sync.Mutex
+	out     io.Writer = os.Stderr
+)
+
+// SetEnabled switches diagnostic output on or off.
+func SetEnabled(on bool) {
+	enabled.Store(on)
+}
+
+// Enabled reports whether diagnostic output is switched on.
+func Enabled() bool {
+	return enabled.Load()
+}
+
+// SetOutput redirects diagnostic output, stderr by default.
+func SetOutput(w io.Writer) {
+	mu.Lock()
+	defer mu.Unlock()
+	out = w
+}
+
+// Printf writes one line tagged with component if output is enabled.
+func Printf(component, format string, args ...any) {
+	if !enabled.Load() {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	fmt.Fprintf(out, "[debug] "+component+": "+format+"\n", args...)
+}
+
+// New returns a printf style function bound to component, meant to be kept
+// in a package level variable:
+//
+//	var debugf = debug.New("loader")
+func New(component string) func(format string, args ...any) {
+	return func(format string, args ...any) {
+		Printf(component, format, args...)
+	}
+}

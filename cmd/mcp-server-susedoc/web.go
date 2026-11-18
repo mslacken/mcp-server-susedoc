@@ -9,11 +9,11 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
 	"mcp-server-susedoc/internal/mcpserver"
 
@@ -334,12 +334,12 @@ func serveWeb(c *docparse.Corpus) http.Handler {
 		http.Redirect(w, r, "/", http.StatusFound)
 	})
 
-	if debug {
+	if debug.Enabled() {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			mux.ServeHTTP(rec, r)
-			fmt.Fprintf(os.Stderr, "[debug] web: %s %s -> %d (%s)\n", r.Method, r.URL.RequestURI(), rec.status, time.Since(start).Round(time.Microsecond))
+			debug.Printf("web", "%s %s -> %d (%s)", r.Method, r.URL.RequestURI(), rec.status, time.Since(start).Round(time.Microsecond))
 		})
 	}
 	return mux

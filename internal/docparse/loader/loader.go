@@ -11,20 +11,14 @@ import (
 	"strings"
 	"sync"
 
+	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
 	"mcp-server-susedoc/internal/docparse/docbook"
 	"mcp-server-susedoc/internal/docparse/markdown"
 	"mcp-server-susedoc/internal/docparse/text"
 )
 
-// Debug enables diagnostic output on stderr while loading documents.
-var Debug bool
-
-func debugf(format string, args ...any) {
-	if Debug {
-		fmt.Fprintf(os.Stderr, "[debug] loader: "+format+"\n", args...)
-	}
-}
+var debugf = debug.New("loader")
 
 // Importers are the formats files are read as, tried in order.
 var Importers = []docparse.Importer{docbook.Importer{}, markdown.Importer{}, text.Importer{}}
