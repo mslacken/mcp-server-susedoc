@@ -16,13 +16,13 @@ func TestDumpLoad(t *testing.T) {
 				Commands: []string{"zypper in foo"}, LinesKey: "guide.md", Prose: "Install foo.",
 			}},
 		}},
-		Glossary: []GlossaryEntry{{Term: "Foo", WhatIs: "A package."}},
+		Glossary: []GlossaryEntry{{Term: "Foo", WhatIs: "A package."}, {Term: "Bar", WhatIs: "Not mentioned."}},
 		Lines:    map[string][]string{"guide.md": {"preamble", "# Intro", "Install foo."}},
 	})
 	c.Finish()
 
 	var buf bytes.Buffer
-	if err := c.Dump(&buf); err != nil {
+	if err := c.DumpDocument(&buf, &c.Documents[0]); err != nil {
 		t.Fatal(err)
 	}
 	got := NewCorpus()
@@ -43,5 +43,8 @@ func TestDumpLoad(t *testing.T) {
 	}
 	if e := got.DefineTerm("foo", nil); len(e) != 1 || e[0].WhatIs != "A package." {
 		t.Errorf("glossary = %+v", e)
+	}
+	if e := got.DefineTerm("bar", nil); len(e) != 0 {
+		t.Errorf("unmentioned glossary term dumped: %+v", e)
 	}
 }
