@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 
 	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
@@ -60,8 +62,7 @@ func main() {
 	asJSON := flag.Bool("json", false, "print documents as json instead of yaml")
 	exportDir := flag.String("export", "", "write the corpus in the internal format to the directory PATH, one <id>.json file per document, then exit")
 	serve := flag.Bool("mcp", false, "serve the documents as MCP server on stdin/stdout")
-	web := flag.Bool("web", false, "serve the documents as a small web interface")
-	port := flag.Int("port", 8080, "port the web interface listens on (with -web)")
+	web := flag.String("web", "", "serve the documents as a small web interface from the given adress a.g. localhost:8080")
 	debugFlag := flag.Bool("debug", false, "log tool calls, web requests and DocBook parsing problems to stderr")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.BoolVar(showVersion, "v", false, "shorthand for -version")
@@ -94,7 +95,7 @@ func main() {
 		return
 	}
 
-	if len(importLocations) == 0 && len(directories) == 0 && len(files) == 0 && (*serve || *web) {
+	if len(importLocations) == 0 && len(directories) == 0 && len(files) == 0 && (*serve || *web != "") {
 		// without any input serve the packaged exports
 		importLocations = append(importLocations, "-")
 	}
@@ -156,9 +157,20 @@ func main() {
 		}
 		return
 	}
-	if *web {
-		addr := fmt.Sprintf(":%d", *port)
-		fmt.Fprintf(os.Stderr, "serving web interface on http://localhost%s/\n", addr)
+	if *web != "" {
+
+		*web = strings.TrimPrefix(*web, "http://")
+		webSplit := strings.Split(*web, ":")
+		port := 8080
+		if len(webSplit) > 1 {
+			var err error
+			port, err = strconv.Atoi(webSplit[1])
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Port is invalid:", webSplit[1])
+			}
+		}
+		addr := fmt.Sprintf("%s:%d", webSplit[0], port)
+		fmt.Fprintf(os.Stderr, "serving web interface on http://%s\n", addr)
 		if err := http.ListenAndServe(addr, serveWeb(corpus)); err != nil {
 			fmt.Fprintln(os.Stderr, "web server:", err)
 			os.Exit(1)
