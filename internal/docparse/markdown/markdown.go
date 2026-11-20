@@ -3,7 +3,6 @@
 package markdown
 
 import (
-	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -11,10 +10,14 @@ import (
 	"slices"
 	"strings"
 
+	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
 
 	"gopkg.in/yaml.v3"
 )
+
+// warnf reports content that is dropped.
+var warnf = debug.NewWarn("markdown")
 
 // ReadFile reads the markdown file p. root is the directory p was found in,
 // or "" if p was named directly. A combined file (see combine.sh) is split
@@ -29,7 +32,7 @@ func ReadFile(p, root string) ([]Segment, error) {
 		return SplitSources(data, p), nil
 	}
 	if isCombined(data) {
-		fmt.Fprintln(os.Stderr, "skipping combined file", p)
+		warnf("skipping combined file %s", p)
 		return nil, nil
 	}
 	rel, err := filepath.Rel(root, p)

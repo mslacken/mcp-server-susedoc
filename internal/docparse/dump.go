@@ -129,8 +129,12 @@ func (c *Corpus) DumpDocument(w io.Writer, d *Document) error {
 
 // Import reads the dump files at path into the corpus and returns their names:
 // path itself if it is a file, and otherwise every *.json file in path and,
-// recursively, in its subdirectories, following symbolic links. Finish must be
-// called once the corpus is complete.
+// recursively, in its subdirectories, following symbolic links. The files are
+// read in parallel, into their own parts, and added in file order, so the
+// document order and the first definition winning for a glossary term stay
+// deterministic. Files that cannot be read are skipped: the corpus holds what
+// was read and the error, if any, joins the reasons the others were skipped.
+// Finish must be called once the corpus is complete.
 func (c *Corpus) Import(path string) ([]string, error) {
 	files, err := dumpFiles(path, map[string]bool{})
 	if err != nil {
@@ -139,18 +143,32 @@ func (c *Corpus) Import(path string) ([]string, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no dump files in %s", path)
 	}
-	for _, name := range files {
-		f, err := os.Open(name)
-		if err != nil {
-			return nil, err
-		}
-		err = c.Load(f)
-		_ = f.Close()
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", name, err)
-		}
+	parts := make([]Part, len(files))
+	errs := make([]error, len(files))
+	var g errgroup.Group
+	// bound the number of files open at once
+	g.SetLimit(runtime.GOMAXPROCS(0))
+	for i, name := range files {
+		g.Go(func() error {
+			f, err := os.Open(name)
+			if err != nil {
+				errs[i] = fmt.Errorf("%s: %w", name, err)
+				return nil
+			}
+			parts[i], err = loadFile(f, i)
+			_ = f.Close()
+			if err != nil {
+				errs[i] = fmt.Errorf("%s: %w", name, err)
+			}
+			return nil
+		})
 	}
-	return files, nil
+	_ = g.Wait()
+	// a file that cannot be read leaves an empty part
+	for _, p := range parts {
+		c.Add(p)
+	}
+	return files, errors.Join(errs...)
 }
 
 // dumpFiles returns the dump files at path, see Import, in lexical order.
@@ -199,12 +217,25 @@ func dumpFiles(path string, seen map[string]bool) ([]string, error) {
 // document, glossary and lines to c, as Add does. Finish must be called once c
 // is complete.
 func (c *Corpus) Load(r io.Reader) error {
-	var in dumpFile
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
+	p, err := loadFile(r, len(c.Documents))
+	if err != nil {
 		return err
 	}
+	c.Add(p)
+	return nil
+}
+
+// loadFile reads one dump file written by DumpDocument from r into a Part,
+// with the document offset giving each chapter's lines a unique key. Adding
+// the Part to a corpus is the caller's job, so it can be done after the files
+// are all read, in order.
+func loadFile(r io.Reader, offset int) (Part, error) {
+	var in dumpFile
+	if err := json.NewDecoder(r).Decode(&in); err != nil {
+		return Part{}, err
+	}
 	if in.Version != DumpVersion {
-		return fmt.Errorf("unknown dump format version %d", in.Version)
+		return Part{}, fmt.Errorf("unknown dump format version %d", in.Version)
 	}
 	d := &in.Document
 	doc := Document{
@@ -215,8 +246,8 @@ func (c *Corpus) Load(r io.Reader) error {
 	for j := range d.Chapters {
 		ch := &d.Chapters[j]
 		lines := strings.Split(ch.Text, "\n")
-		// the document index is unique within c, unlike the document id
-		key := fmt.Sprintf("dump\x00%d\x00%d", len(c.Documents), j)
+		// the document offset is unique within the corpus, unlike the document id
+		key := fmt.Sprintf("dump\x00%d\x00%d", offset, j)
 		p.Lines[key] = lines
 		doc.Chapters = append(doc.Chapters, Chapter{
 			ID: ch.ID, Title: ch.Title, Summary: ch.Summary,
@@ -227,6 +258,5 @@ func (c *Corpus) Load(r io.Reader) error {
 		})
 	}
 	p.Documents = append(p.Documents, doc)
-	c.Add(p)
-	return nil
+	return p, nil
 }

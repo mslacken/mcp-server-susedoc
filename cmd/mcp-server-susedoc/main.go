@@ -66,6 +66,7 @@ func main() {
 	dump := flag.Bool("dump", false, "print the corpus to stdout instead of serving it as an MCP server")
 	asJSON := flag.Bool("json", false, "with -dump, print documents as json instead of yaml")
 	debugFlag := flag.Bool("debug", false, "log tool calls, web requests and DocBook parsing problems to stderr")
+	failWarn := flag.Bool("failwarn", false, "exit with an error if there were warnings while reading the documents, like files that were skipped")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.BoolVar(showVersion, "v", false, "shorthand for -version")
 	flag.Parse()
@@ -109,10 +110,7 @@ func main() {
 				location = defaultImportDir
 			}
 			imported, err := corpus.Import(location)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "error importing corpus:", err)
-				os.Exit(1)
-			}
+			debug.Warn("main", err)
 			for _, name := range imported {
 				debug.Printf("main", "imported %s", name)
 			}
@@ -141,6 +139,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, "error reading input:", err)
 			os.Exit(1)
 		}
+	}
+	if *failWarn && debug.Warnings() > 0 {
+		fmt.Fprintf(os.Stderr, "error reading input: %d warnings\n", debug.Warnings())
+		os.Exit(1)
 	}
 	if *exportDir != "" {
 		if err := corpus.Export(*exportDir); err != nil {

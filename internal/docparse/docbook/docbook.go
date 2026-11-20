@@ -25,9 +25,7 @@ var debugf = debug.New("docbook")
 
 // warnf reports content that is dropped, like the "skipping combined file"
 // message of the markdown loader.
-func warnf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "docbook: "+format+"\n", args...)
-}
+var warnf = debug.NewWarn("docbook")
 
 // DCFiles returns the names of the DC files at the top level of dir, sorted.
 // Disabled ones (_DC-*) do not match.

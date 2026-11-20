@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
-	"sync"
 
 	"mcp-server-susedoc/internal/docparse"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // Importer reads DC files. DC files in the same directory share one Loader,
@@ -40,25 +41,19 @@ func (Importer) Import(files []docparse.Source) (docparse.Part, error) {
 	}
 	parts := make([]docparse.Part, len(files))
 	errs := make([]error, len(files))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	for range runtime.GOMAXPROCS(0) {
-		wg.Go(func() {
-			for i := range jobs {
-				f := files[i]
-				debugf("reading %s", f.Path)
-				parts[i], errs[i] = loaders[filepath.Dir(f.Path)].Read(filepath.Base(f.Path))
-				if errs[i] != nil {
-					errs[i] = fmt.Errorf("skipping %s: %w", f.Path, errs[i])
-				}
+	var g errgroup.Group
+	g.SetLimit(runtime.GOMAXPROCS(0))
+	for i, f := range files {
+		g.Go(func() error {
+			debugf("reading %s", f.Path)
+			parts[i], errs[i] = loaders[filepath.Dir(f.Path)].Read(filepath.Base(f.Path))
+			if errs[i] != nil {
+				errs[i] = fmt.Errorf("skipping %s: %w", f.Path, errs[i])
 			}
+			return nil
 		})
 	}
-	for i := range files {
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
+	_ = g.Wait()
 	var out docparse.Part
 	for i := range parts {
 		out.Merge(parts[i])

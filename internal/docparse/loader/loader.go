@@ -125,9 +125,7 @@ func Load(files []DocFile) (*docparse.Corpus, error) {
 
 	c := docparse.NewCorpus()
 	for i := range order {
-		if errs[i] != nil {
-			fmt.Fprintln(os.Stderr, errs[i])
-		}
+		debug.Warn("loader", errs[i])
 		c.Add(parts[i])
 	}
 	if len(c.Documents) == 0 {
