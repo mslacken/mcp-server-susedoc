@@ -54,18 +54,17 @@ func (s *StringSlice) Set(value string) error {
 }
 
 func main() {
-	var directories StringSlice
-	var files StringSlice
-	var importLocations StringSlice
+	var directories, files, importLocations StringSlice
 	flag.Var(&directories, "d", "directory to read all DocBook DC, markdown and text files from, may be given more than once")
 	flag.Var(&files, "f", "doc file to parse (DC file, markdown or text), may be given more than once or as arguments (default: stdin)")
 	flag.Var(&importLocations, "import", "read documents in the internal format from PATH instead of -d/-f, may be given more than once; PATH is a document file or a directory searched recursively for *.json files; - reads "+defaultImportDir)
-	tree := flag.Bool("tree", false, "dump the raw markdown node tree as json")
-	asJSON := flag.Bool("json", false, "print documents as json instead of yaml")
 	exportDir := flag.String("export", "", "write the corpus in the internal format to the directory PATH, one <id>.json file per document, then exit")
-	enableMcp := flag.Bool("mcp", false, "serve the documents as MCP server on stdin/stdout")
+	mcpAddr := flag.String("mcp", "", "by default the binary serves the documents as an MCP server over stdin/stdout; with an address argument (a.g. localhost:8080) it listens on that address and is exposed at /mcp over http(s). Giving -mcp without an argument is the same as the default")
 	web := flag.String("web", "", "serve the documents as a small web interface from the given adress a.g. localhost:8080")
-	tlsDir := flag.String("tls", "", "directory holding the tls certificate and private key .pem files; with -web the server is served over https and with -mcp the server is exposed at the http endpoint https://addr/mcp")
+	tlsDir := flag.String("tls", "", "directory holding the tls certificate and private key .pem files; with -web the server is served over https and with -mcp addr the server is exposed at https://addr/mcp")
+	tree := flag.Bool("tree", false, "dump the raw markdown node tree as json")
+	dump := flag.Bool("dump", false, "print the corpus to stdout instead of serving it as an MCP server")
+	asJSON := flag.Bool("json", false, "with -dump, print documents as json instead of yaml")
 	debugFlag := flag.Bool("debug", false, "log tool calls, web requests and DocBook parsing problems to stderr")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.BoolVar(showVersion, "v", false, "shorthand for -version")
@@ -77,9 +76,9 @@ func main() {
 	debug.SetEnabled(*debugFlag)
 	files = append(files, flag.Args()...)
 
+	var err error
 	if *tree {
 		var data []byte
-		var err error
 		if len(files) > 0 {
 			data, err = os.ReadFile(files[0])
 		} else {
@@ -95,26 +94,16 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println(string(enc))
-		return
+		os.Exit(0)
 	}
 
+	// without any input use the packaged exports
 	if len(importLocations) == 0 && len(directories) == 0 && len(files) == 0 {
-		// without any input serve the packaged exports
 		importLocations = append(importLocations, "-")
 	}
-	if len(importLocations) == 0 && len(directories) == 0 && len(files) == 0 {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error reading input:", err)
-			os.Exit(1)
-		}
-		printCorpus(markdown.BuildDocuments(markdown.SplitSources(data, "stdin")), *asJSON)
-		return
-	}
 
-	var corpus *docparse.Corpus
+	corpus := docparse.NewCorpus()
 	if len(importLocations) > 0 {
-		corpus = docparse.NewCorpus()
 		for _, location := range importLocations {
 			if location == "-" {
 				location = defaultImportDir
@@ -158,7 +147,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "error writing export:", err)
 			os.Exit(1)
 		}
-		return
+		os.Exit(0)
+	}
+	if *dump {
+		printCorpus(corpus, *asJSON)
+		os.Exit(0)
 	}
 	// parseAddress turns "host[:port]" into "host:port", defaulting the port
 	// to 8080 and dropping a leading http:// or https:// scheme.
@@ -192,29 +185,32 @@ func main() {
 		}
 		return srv.Serve(ln)
 	}
-	if *enableMcp && *tlsDir != "" {
-		// MCP over the network at https://addr/mcp, the address taken from
-		// -web (defaulting to localhost:8080); without -tls, -mcp serves on
-		// stdin/stdout instead.
-		addr, err := parseAddress(*web)
+	if *mcpAddr != "" {
+		// -mcp with an address listens on it and exposes the MCP server at
+		// /mcp over http(s) (https when -tls is given).
+		addr, err := parseAddress(*mcpAddr)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "mcp:", err)
 			os.Exit(1)
 		}
-		tlsCfg, err := loadTLS(*tlsDir)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "tls:", err)
-			os.Exit(1)
+		var tlsCfg *tls.Config
+		scheme := "http"
+		if *tlsDir != "" {
+			tlsCfg, err = loadTLS(*tlsDir)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "tls:", err)
+				os.Exit(1)
+			}
+			scheme = "https"
 		}
 		srv := mcpserver.NewServer(corpus)
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil))
-		fmt.Fprintf(os.Stderr, "serving mcp server on https://%s/mcp\n", addr)
+		fmt.Fprintf(os.Stderr, "serving mcp server on %s://%s/mcp\n", scheme, addr)
 		if err := serveHTTP(addr, mux, tlsCfg); err != nil {
 			fmt.Fprintln(os.Stderr, "mcp server:", err)
 			os.Exit(1)
 		}
-		return
 	}
 	if *web != "" {
 		addr, err := parseAddress(*web)
@@ -237,14 +233,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, "web server:", err)
 			os.Exit(1)
 		}
-		return
 	}
-	if *enableMcp {
-		if err := mcpserver.NewServer(corpus).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-			fmt.Fprintln(os.Stderr, "mcp server:", err)
-			os.Exit(1)
-		}
-		return
+	// The default: serve the MCP server on stdin/stdout.
+	if err := mcpserver.NewServer(corpus).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+		fmt.Fprintln(os.Stderr, "mcp server:", err)
+		os.Exit(1)
 	}
-	printCorpus(corpus, *asJSON)
 }
