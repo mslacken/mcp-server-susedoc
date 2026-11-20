@@ -12,6 +12,36 @@ and presents every document through the MCP tools and resources described
 below. Parsed documents can also be exported to a JSON format and read back,
 so the server can run from prepackaged exports without the original sources.
 
+## Quick start
+
+Read every markdown file below a directory and browse it in the web
+interface at <http://localhost:8080>:
+
+```
+go run ./cmd/mcp-server-susedoc/ -web localhost:8080 -d ~/my-docs
+```
+
+Print what was parsed (yaml, add `-json` for json):
+
+```
+go run ./cmd/mcp-server-susedoc/ -dump -d ~/my-docs
+```
+
+Serve the same documents as an MCP server, either on stdin/stdout (the
+default) or over HTTP at `http://localhost:8081/mcp`:
+
+```
+go run ./cmd/mcp-server-susedoc/ -d ~/my-docs
+go run ./cmd/mcp-server-susedoc/ -mcp localhost:8081 -d ~/my-docs
+```
+
+To use it from Claude Code, for example, register one of the two:
+
+```
+claude mcp add susedoc -- go run ./cmd/mcp-server-susedoc/ -d ~/my-docs
+claude mcp add --transport http susedoc http://localhost:8081/mcp
+```
+
 ## Data model
 
 Every document follows the Go structs defined in
