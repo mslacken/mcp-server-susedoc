@@ -40,18 +40,17 @@ type Product struct {
 
 // Chapter is a top level section of a document.
 type Chapter struct {
-	ID         string    `json:"id" yaml:"id"`
-	Title      string    `json:"chapter_title" yaml:"chapter_title"`
-	Summary    string    `json:"summary,omitempty" yaml:"summary,omitempty"` // lead paragraphs
-	Start      uint      `json:"start" yaml:"start"`                         // first line, counted in the original source file
-	End        uint      `json:"end" yaml:"end"`                             // last line, counted in the original source file
-	FilePath   string    `json:"file_path" yaml:"file_path"`                 // file the chapter was parsed from (preferred)
-	SourcePath string    `json:"source_path,omitempty" yaml:"source_path,omitempty"`
-	Commands   []string  `json:"commands,omitempty" yaml:"commands,omitempty"`
-	Sections   []Section `json:"sections,omitempty" yaml:"sections,omitempty"` // headings below the chapter
-	Xrefs      []Xref    `json:"xrefs,omitempty" yaml:"xrefs,omitempty"`       // cross references, resolved against the corpus
+	ID       string    `json:"id" yaml:"id"`
+	Title    string    `json:"chapter_title" yaml:"chapter_title"`
+	Summary  string    `json:"summary,omitempty" yaml:"summary,omitempty"`   // lead paragraphs
+	File     string    `json:"file,omitempty" yaml:"file,omitempty"`         // file the chapter was written in
+	Commands []string  `json:"commands,omitempty" yaml:"commands,omitempty"` // shell commands shown in the chapter
+	Sections []Section `json:"sections,omitempty" yaml:"sections,omitempty"` // headings below the chapter
+	Xrefs    []string  `json:"xrefs,omitempty" yaml:"xrefs,omitempty"`       // linkends of the cross references, see Corpus.XrefTargets
 
 	LinesKey string `json:"-" yaml:"-"` // key of the source lines, see Corpus.AddLines
+	Start    uint   `json:"-" yaml:"-"` // first line of the chapter in the source lines, 1-based
+	End      uint   `json:"-" yaml:"-"` // last line of the chapter in the source lines
 	Prose    string `json:"-" yaml:"-"` // text outside of code blocks, used for glossary matching and search
 
 	// Extra carries format specific chapter data, set by the parser that
@@ -70,13 +69,6 @@ type Section struct {
 	Title  string `json:"title" yaml:"title"`
 	Level  int    `json:"level" yaml:"level"`
 	File   string `json:"file,omitempty" yaml:"file,omitempty"`
-}
-
-// Xref is a cross reference; Resolved is false if the target is not part of
-// the document.
-type Xref struct {
-	Linkend  string `json:"linkend" yaml:"linkend"`
-	Resolved bool   `json:"resolved" yaml:"resolved"`
 }
 
 // XrefTarget is a cross reference of a chapter resolved against the whole

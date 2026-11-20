@@ -49,9 +49,7 @@ type tocEntry struct {
 type chapterOut struct {
 	ID         string                   `json:"id"`
 	Title      string                   `json:"title"`
-	SourcePath string                   `json:"source_path"`
-	Start      uint                     `json:"start"`
-	End        uint                     `json:"end"`
+	File       string                   `json:"file,omitempty"`
 	Markdown   string                   `json:"markdown"`
 	Commands   []string                 `json:"commands,omitempty"`
 	Glossary   []docparse.GlossaryEntry `json:"glossary,omitempty"`
@@ -118,12 +116,8 @@ func BuildReadDocument(c *docparse.Corpus, docID, chapterID string) (ReadDocumen
 	if ch == nil {
 		return ReadDocumentOut{}, fmt.Errorf("unknown chapter %q in document %q", chapterID, docID)
 	}
-	src := ch.SourcePath
-	if src == "" {
-		src = ch.FilePath
-	}
 	out.Chapter = &chapterOut{
-		ID: ch.ID, Title: ch.Title, SourcePath: src, Start: ch.Start, End: ch.End,
+		ID: ch.ID, Title: ch.Title, File: ch.File,
 		Markdown: c.Text(ch), Commands: nonNil(ch.Commands), Glossary: c.GlossaryForChapter(ch),
 		References: nonNil(c.XrefTargets(doc.ID, ch)),
 	}

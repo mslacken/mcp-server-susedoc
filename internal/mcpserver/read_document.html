@@ -32,7 +32,7 @@
     {{with .chapter}}
       <div class="result-card">
         <h2 style="margin:0 0 4px">{{esc .title}}</h2>
-        {{if .source_path}}<div class="meta">source: <code>{{esc .source_path}}</code> &middot; lines {{.start}}&ndash;{{.end}}</div>{{end}}
+        {{if .file}}<div class="meta">source: <code>{{esc .file}}</code></div>{{end}}
         <div class="section-h">Chapter</div>
         {{markdown .markdown}}
         {{if .commands}}

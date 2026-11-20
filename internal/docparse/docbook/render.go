@@ -91,7 +91,7 @@ func (r *renderer) glossary(modules []*dbModule) []docparse.GlossaryEntry {
 // the document before the chapter, for Start and End. The DocBook extras are
 // returned separately so the caller can attach them to the core chapter.
 func (r *renderer) chapter(m *dbModule, offset int) (ch docparse.Chapter, extra *ChapterExtra, lines []string) {
-	ch = docparse.Chapter{Title: m.title, FilePath: m.file}
+	ch = docparse.Chapter{Title: m.title, File: m.file}
 	extra = &ChapterExtra{
 		TopicType:     "container",
 		LegacySources: m.legacy,
@@ -898,21 +898,12 @@ func (r *renderer) inline(n *xnode) string {
 }
 
 func (r *renderer) xref(linkend, text string) string {
-	title, ok := r.ids[linkend]
-	if r.ch != nil && !containsXref(r.ch.Xrefs, linkend) {
-		r.ch.Xrefs = append(r.ch.Xrefs, docparse.Xref{Linkend: linkend, Resolved: ok})
+	title := r.ids[linkend]
+	if r.ch != nil && !slices.Contains(r.ch.Xrefs, linkend) {
+		r.ch.Xrefs = append(r.ch.Xrefs, linkend)
 	}
 	text = firstNonEmpty(text, title, linkend)
 	return "[" + text + "](#" + linkend + ")"
-}
-
-func containsXref(xs []docparse.Xref, linkend string) bool {
-	for _, x := range xs {
-		if x.Linkend == linkend {
-			return true
-		}
-	}
-	return false
 }
 
 func (r *renderer) link(n *xnode) string {

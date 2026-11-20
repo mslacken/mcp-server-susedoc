@@ -348,7 +348,7 @@ func TestDocBookCorpus(t *testing.T) {
 	}
 	ch := sles.Chapters[0]
 	chEx := chapExtra(t, &ch)
-	if ch.ID != "install" || chEx.Number != "1" || ch.Title != "Install it" || ch.FilePath != "tasks/install.xml" || chEx.TopicType != "task" ||
+	if ch.ID != "install" || chEx.Number != "1" || ch.Title != "Install it" || ch.File != "tasks/install.xml" || chEx.TopicType != "task" ||
 		chEx.Maintainer != "geeko@example.com" || ch.Summary != "How to install the demo." {
 		t.Errorf("chapter = %+v", ch)
 	}
@@ -359,7 +359,7 @@ func TestDocBookCorpus(t *testing.T) {
 		!reflect.DeepEqual(chEx.LegacySources, []string{"https://github.com/SUSE/doc-sle/blob/main/xml/install.xml"}) {
 		t.Errorf("includes %q, legacy %q", chEx.Includes, chEx.LegacySources)
 	}
-	if want := []docparse.Xref{{Linkend: "about-sec", Resolved: true}, {Linkend: "dangling", Resolved: false}}; !reflect.DeepEqual(ch.Xrefs, want) {
+	if want := []string{"about-sec", "dangling"}; !reflect.DeepEqual(ch.Xrefs, want) {
 		t.Errorf("xrefs = %+v", ch.Xrefs)
 	}
 	// Cross references resolve to their navigable target: "about-sec" is a

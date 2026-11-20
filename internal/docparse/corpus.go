@@ -156,13 +156,13 @@ func (c *Corpus) Finish() {
 func (c *Corpus) XrefTargets(docID string, ch *Chapter) []XrefTarget {
 	out := make([]XrefTarget, 0, len(ch.Xrefs))
 	seen := map[string]bool{}
-	for _, x := range ch.Xrefs {
-		if seen[x.Linkend] {
+	for _, linkend := range ch.Xrefs {
+		if seen[linkend] {
 			continue
 		}
-		seen[x.Linkend] = true
-		t := XrefTarget{Linkend: x.Linkend}
-		if loc := c.locate(docID, x.Linkend); loc != nil {
+		seen[linkend] = true
+		t := XrefTarget{Linkend: linkend}
+		if loc := c.locate(docID, linkend); loc != nil {
 			t.Resolved = true
 			t.Text = loc.title
 			t.DocID = loc.docID

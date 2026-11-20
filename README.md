@@ -47,16 +47,13 @@ type Product struct {
 }
 
 type Chapter struct {
-    ID         string    `json:"id" yaml:"id"`
-    Title      string    `json:"chapter_title" yaml:"chapter_title"`
-    Summary    string    `json:"summary,omitempty" yaml:"summary,omitempty"`
-    Start      uint      `json:"start" yaml:"start"`
-    End        uint      `json:"end" yaml:"end"`
-    FilePath   string    `json:"file_path" yaml:"file_path"`
-    SourcePath string    `json:"source_path,omitempty" yaml:"source_path,omitempty"`
-    Commands   []string  `json:"commands,omitempty" yaml:"commands,omitempty"`
-    Sections   []Section `json:"sections,omitempty" yaml:"sections,omitempty"`
-    Xrefs      []Xref    `json:"xrefs,omitempty" yaml:"xrefs,omitempty"`
+    ID       string    `json:"id" yaml:"id"`
+    Title    string    `json:"chapter_title" yaml:"chapter_title"`
+    Summary  string    `json:"summary,omitempty" yaml:"summary,omitempty"`
+    File     string    `json:"file,omitempty" yaml:"file,omitempty"`
+    Commands []string  `json:"commands,omitempty" yaml:"commands,omitempty"`
+    Sections []Section `json:"sections,omitempty" yaml:"sections,omitempty"`
+    Xrefs    []string  `json:"xrefs,omitempty" yaml:"xrefs,omitempty"`
 }
 
 type Section struct {
@@ -65,11 +62,6 @@ type Section struct {
     Title  string `json:"title" yaml:"title"`
     Level  int    `json:"level" yaml:"level"`
     File   string `json:"file,omitempty" yaml:"file,omitempty"`
-}
-
-type Xref struct {
-    Linkend  string `json:"linkend" yaml:"linkend"`
-    Resolved bool   `json:"resolved" yaml:"resolved"`
 }
 
 type GlossaryEntry struct {
@@ -99,12 +91,10 @@ type GlossaryEntry struct {
 | `id` | Chapter id, unique within the document |
 | `chapter_title` | Chapter heading |
 | `summary` | Lead paragraphs of the chapter |
-| `start`, `end` | First and last line of the chapter, counted in the original source file |
-| `file_path` | File the chapter was parsed from |
-| `source_path` | Original source file, if it differs from `file_path` |
+| `file` | File the chapter was written in: the DocBook topic file, the markdown file (the original one for combined files) or the text file |
 | `commands` | Shell commands shown in the chapter |
 | `sections` | Headings below the chapter heading |
-| `xrefs` | Cross references of the chapter |
+| `xrefs` | Linkends (target ids) of the chapter's cross references; only DocBook chapters have them |
 
 **Section**
 
@@ -116,15 +106,8 @@ type GlossaryEntry struct {
 | `level` | Depth below the chapter, `1` is a direct subsection |
 | `file` | Topic file the section was taken from (nested modules) |
 
-**Xref**
-
-| Field | Meaning |
-|-------|---------|
-| `linkend` | Target id of the reference |
-| `resolved` | `false` if the target is not part of the document |
-
-`read_document` additionally resolves a chapter's cross references against the
-whole corpus and returns them as `XrefTarget`:
+`read_document` resolves a chapter's `xrefs` against the whole corpus and
+returns them as `references`, a list of `XrefTarget`:
 
 ```go
 type XrefTarget struct {
@@ -151,7 +134,7 @@ and the glossary entries its chapters mention.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "document": {
     "id": "...", "title": "...", "summary": "...",
     "distro": {"name": "...", "versions": ["..."]},
@@ -160,8 +143,8 @@ and the glossary entries its chapters mention.
     "chapters": [
       {
         "id": "...", "chapter_title": "...", "summary": "...",
-        "start": 1, "end": 42, "file_path": "...", "source_path": "...",
-        "commands": ["..."], "sections": [], "xrefs": [],
+        "file": "...",
+        "commands": ["..."], "sections": [], "xrefs": ["..."],
         "text": "chapter markdown",
         "prose": "text outside of code blocks"
       }

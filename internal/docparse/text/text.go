@@ -63,11 +63,11 @@ func ReadFile(p string) (docparse.Part, error) {
 			ID:       docparse.UniqueID(ids, docparse.Slug(title)),
 			Title:    title,
 			Summary:  leadParagraph(lines[min(body, end):end]),
-			Start:    uint(start + 1),
-			End:      uint(end),
-			FilePath: p,
+			File:     p,
 			Commands: markdown.CommandsInText(strings.Join(trimmed, "\n")),
 			LinesKey: p,
+			Start:    uint(start + 1),
+			End:      uint(end),
 			Prose:    text,
 		})
 	}

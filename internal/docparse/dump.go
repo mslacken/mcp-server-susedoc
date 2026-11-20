@@ -20,28 +20,26 @@ var debugf = debug.New("docparse")
 
 // DumpVersion is the version of the dump format, for future compatibility.
 // Version 1 held the whole corpus in one file, version 2 holds one document
-// per file.
-const DumpVersion = 2
+// per file, version 3 merges the chapter's file_path and source_path into
+// file, drops its start and end lines and holds xrefs as plain linkends.
+const DumpVersion = 3
 
 // The dump format holds the MCP surface of every document and chapter (id,
-// title, summary, distro, product, commands, sections, xrefs, license), plus
+// title, summary, distro, product, file, commands, sections, xrefs, license), plus
 // each chapter's markdown and prose, so that a corpus read back from it is self
 // sufficient and can be served without the original sources. Format specific
 // extras (like the DocBook provenance) are not part of it.
 
 type dumpChapter struct {
-	ID         string    `json:"id"`
-	Title      string    `json:"chapter_title"`
-	Summary    string    `json:"summary,omitempty"`
-	Start      uint      `json:"start"`
-	End        uint      `json:"end"`
-	FilePath   string    `json:"file_path"`
-	SourcePath string    `json:"source_path,omitempty"`
-	Commands   []string  `json:"commands,omitempty"`
-	Sections   []Section `json:"sections,omitempty"`
-	Xrefs      []Xref    `json:"xrefs,omitempty"`
-	Text       string    `json:"text"`
-	Prose      string    `json:"prose,omitempty"`
+	ID       string    `json:"id"`
+	Title    string    `json:"chapter_title"`
+	Summary  string    `json:"summary,omitempty"`
+	File     string    `json:"file,omitempty"`
+	Commands []string  `json:"commands,omitempty"`
+	Sections []Section `json:"sections,omitempty"`
+	Xrefs    []string  `json:"xrefs,omitempty"`
+	Text     string    `json:"text"`
+	Prose    string    `json:"prose,omitempty"`
 }
 
 type dumpDocument struct {
@@ -113,9 +111,8 @@ func (c *Corpus) DumpDocument(w io.Writer, d *Document) error {
 	for j := range d.Chapters {
 		ch := &d.Chapters[j]
 		out.Document.Chapters = append(out.Document.Chapters, dumpChapter{
-			ID: ch.ID, Title: ch.Title, Summary: ch.Summary, Start: ch.Start, End: ch.End,
-			FilePath: ch.FilePath, SourcePath: ch.SourcePath, Commands: ch.Commands,
-			Sections: ch.Sections, Xrefs: ch.Xrefs,
+			ID: ch.ID, Title: ch.Title, Summary: ch.Summary, File: ch.File,
+			Commands: ch.Commands, Sections: ch.Sections, Xrefs: ch.Xrefs,
 			Text: c.Text(ch), Prose: ch.Prose,
 		})
 		terms = append(terms, c.termsIn(ch.Prose)...)
@@ -250,11 +247,9 @@ func loadFile(r io.Reader, offset int) (Part, error) {
 		key := fmt.Sprintf("dump\x00%d\x00%d", offset, j)
 		p.Lines[key] = lines
 		doc.Chapters = append(doc.Chapters, Chapter{
-			ID: ch.ID, Title: ch.Title, Summary: ch.Summary,
-			Start: 1, End: uint(len(lines)),
-			FilePath: ch.FilePath, SourcePath: ch.SourcePath, Commands: ch.Commands,
-			Sections: ch.Sections, Xrefs: ch.Xrefs,
-			LinesKey: key, Prose: ch.Prose,
+			ID: ch.ID, Title: ch.Title, Summary: ch.Summary, File: ch.File,
+			Commands: ch.Commands, Sections: ch.Sections, Xrefs: ch.Xrefs,
+			LinesKey: key, Start: 1, End: uint(len(lines)), Prose: ch.Prose,
 		})
 	}
 	p.Documents = append(p.Documents, doc)

@@ -12,7 +12,7 @@ func TestDumpLoad(t *testing.T) {
 		Documents: []Document{{
 			ID: "guide", Title: "Guide", Distro: Distro{Name: "SLES", Versions: []string{"16.0"}},
 			Chapters: []Chapter{{
-				ID: "intro", Title: "Intro", Start: 2, End: 3, FilePath: "guide.md",
+				ID: "intro", Title: "Intro", Start: 2, End: 3, File: "guide.md",
 				Commands: []string{"zypper in foo"}, LinesKey: "guide.md", Prose: "Install foo.",
 			}},
 		}},

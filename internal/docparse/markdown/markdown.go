@@ -318,20 +318,15 @@ func addChapters(doc *docparse.Document, s Segment, hs []heading) ([]string, []d
 			continue
 		}
 		a := Analyze(section)
-		sourcePath := ""
-		if s.file != s.name {
-			sourcePath = s.file
-		}
 		doc.Chapters = append(doc.Chapters, docparse.Chapter{
-			Title:      title,
-			Start:      uint(h.idx + 1),
-			End:        uint(end),
-			FilePath:   s.name,
-			SourcePath: sourcePath,
-			Commands:   a.Commands,
-			Summary:    a.Lead,
-			LinesKey:   s.key(),
-			Prose:      a.Prose,
+			Title:    title,
+			File:     s.file,
+			Commands: a.Commands,
+			Summary:  a.Lead,
+			LinesKey: s.key(),
+			Start:    uint(h.idx + 1),
+			End:      uint(end),
+			Prose:    a.Prose,
 		})
 	}
 	return legal, glossary

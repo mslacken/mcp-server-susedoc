@@ -87,7 +87,7 @@ func TestReadDocument(t *testing.T) {
 		t.Errorf("expected no table of contents with a chapter, got %d entries", len(out.TOC))
 	}
 	ch := out.Chapter
-	if !strings.HasPrefix(ch.Markdown, "## Setup\n\nThe CIB") || ch.SourcePath != "guide/index.md" {
+	if !strings.HasPrefix(ch.Markdown, "## Setup\n\nThe CIB") || ch.File != "guide/index.md" {
 		t.Errorf("chapter = %+v", ch)
 	}
 	var terms []string
