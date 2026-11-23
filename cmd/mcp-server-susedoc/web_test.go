@@ -70,7 +70,7 @@ func TestWebPagesRender(t *testing.T) {
 		want    []string
 		notWant []string
 	}{
-		{name: "index", url: "/", want: []string{"/documents", "/search", "/command", "/term"}},
+		{name: "index", url: "/", want: []string{"/documents", "/search", "/command", "/term", "/glossary"}},
 		{name: "documents", url: "/documents", want: []string{"Guide", "Sample Product", "Read &rarr;", `<option value="" selected>All</option>`}},
 		{name: "documents-filter", url: "/documents?product=Nope", want: []string{"validating", `<option value="">All</option>`}},
 		{name: "documents-version", url: "/documents?version=1.0", want: []string{`<option value="">All</option>`, `<option value="1.0" selected>`}},
@@ -93,6 +93,9 @@ func TestWebPagesRender(t *testing.T) {
 		{name: "command-empty", url: "/command?pattern=zzz", want: []string{"No matching commands"}},
 		{name: "term", url: "/term?term=CIB", want: []string{"cluster information base", "The cluster configuration."}},
 		{name: "term-empty", url: "/term?term=zzz", want: []string{"No glossary entry"}},
+		{name: "glossary", url: "/glossary",
+			want: []string{"cluster information base", "The cluster configuration.", "designated coordinator", "The coordinator.", "Used in:", `/document/guide`, "no document"}},
+		{name: "glossary-count", url: "/glossary", want: []string{"2 entries"}},
 	}
 
 	for _, tc := range cases {
@@ -138,6 +141,7 @@ func TestWebAPI(t *testing.T) {
 		{"/api/search_docs?query=quorum&limit=1", http.StatusOK, `"hits"`},
 		{"/api/find_command?pattern=crm", http.StatusOK, "crm configure show"},
 		{"/api/define_term?term=CIB", http.StatusOK, "cluster information base"},
+		{"/api/list_glossary", http.StatusOK, `"term": "CIB (cluster information base)"`},
 		{"/api/corpus", http.StatusOK, `"documents": 1`},
 		{"/api/nope", http.StatusNotFound, "unknown tool"},
 	}

@@ -53,11 +53,12 @@ func distroPart(p string) *regexp.Regexp {
 //go:embed search_docs.html
 //go:embed find_command.html
 //go:embed define_term.html
+//go:embed list_glossary.html
 var pages embed.FS
 
 // PageNames are the page templates in PageTemplates, which are also the names
 // of the tools they render.
-var PageNames = []string{"list_documents", "read_document", "search_docs", "find_command", "define_term"}
+var PageNames = []string{"list_documents", "read_document", "search_docs", "find_command", "define_term", "list_glossary"}
 
 // PageTemplates returns the file system holding the per-tool page templates,
 // so the command can parse them into the same template set as its shell.

@@ -201,6 +201,8 @@ The MCP server exposes the following tools:
 * `find_command` — backward search for where a shell command is mentioned in
   the documentation
 * `define_term` — returns the glossary definition of a term
+* `list_glossary` — lists every glossary term and definition, with the
+  documents that use each term
 
 The same data is also available as MCP resources:
 

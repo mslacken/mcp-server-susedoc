@@ -24,3 +24,20 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: package reference
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          tar -czf "reference-${TAG}.tar.gz" -C reference markdown
+          ID="$(curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/v${TAG}" \
+            | sed -n 's/.*"id": \([0-9]*\).*/\1/p')"
+          curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -X POST \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${ID}/assets" \
+            -H "Content-Type: application/gzip" \
+            -d @"reference-${TAG}.tar.gz"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

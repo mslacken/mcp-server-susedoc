@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 	"unicode"
@@ -53,9 +54,7 @@ func splitFrontMatter(data []byte) (map[string]any, []byte) {
 
 func metaNode(meta map[string]any) node {
 	content := make(map[string]any, len(meta))
-	for k, v := range meta {
-		content[k] = v
-	}
+	maps.Copy(content, meta)
 	return node{Type: "FrontMatter", Content: content, Children: []node{}}
 }
 
@@ -206,10 +205,9 @@ func transform(n node) node {
 			}
 		}
 		if c.Type == "CodeBlock" {
-			if c.Content == nil {
-				c.Content = map[string]any{}
+			if c.Content["language"] == "" {
+				c.Content["language"] = "shell"
 			}
-			c.Content["language"] = detectLang(c)
 		}
 	}
 	n.Children = groupLists(n.Children)
@@ -292,9 +290,6 @@ func imageFrom(p node) node {
 var (
 	reBullet  = regexp.MustCompile(`^[-*+]$`)
 	reOrdered = regexp.MustCompile(`^\d{1,3}[.)]$`)
-
-	reShellPrompt = regexp.MustCompile(`^(?:> \S|crm\(|\S*@\S*\s*[>#]\s|\S+\s*[>#]\s)`)
-	reShellCmd    = regexp.MustCompile(`^\s*(?:[#$%>]\s+)*(?:sudo\s+|crm\s+|crmsh\s+|systemctl\s+|sbd\s+|fence_[a-z]+\s+|corosync\s+|ha\s+|zypper\s+|rpm\s+|crmd\s+|crm_[a-z]+\s+|pacemaker[a-z]+\s+|crash_test\s+)`)
 )
 
 // markerKind reports 0 (not a bare list marker), 1 (bullet) or 2 (ordered) for a
@@ -368,29 +363,6 @@ func groupLists(children []node) []node {
 		out = []node{}
 	}
 	return out
-}
-
-func detectLang(n node) string {
-	s, _ := n.Content["text"].(string)
-	console, shell := false, false
-	for _, ln := range strings.Split(s, "\n") {
-		t := strings.TrimSpace(ln)
-		if t == "" {
-			continue
-		}
-		if reShellPrompt.MatchString(t) {
-			console = true
-		} else if reShellCmd.MatchString(t) {
-			shell = true
-		}
-	}
-	switch {
-	case console:
-		return "console"
-	case shell:
-		return "shell"
-	}
-	return ""
 }
 
 func innerText(n ast.Node) string {

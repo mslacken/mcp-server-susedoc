@@ -20,6 +20,7 @@ type Corpus struct {
 	Glossary  map[string]GlossaryEntry `json:"glossary" yaml:"glossary"` // key: lower case term
 
 	lines     map[string][]string  // source -> lines, see Chapter.LinesKey
+	termDocs  map[string][]string  // glossary term -> ids of documents that use it
 	ids       map[string]int       // document ids handed out, see AddDocument
 	df        map[string]int       // number of chapters containing a word, for search
 	total     int                  // number of chapters
@@ -118,11 +119,16 @@ func (c *Corpus) Finish() {
 	c.df = map[string]int{}
 	c.commands = nil
 	c.xrefIndex = map[string][]xrefLoc{}
+	c.termDocs = map[string][]string{}
 	for d := range c.Documents {
 		doc := &c.Documents[d]
+		seenTerms := map[string]bool{}
 		for i := range doc.Chapters {
 			c.total++
 			ch := &doc.Chapters[i]
+			for _, term := range c.termsIn(ch.Prose) {
+				seenTerms[term] = true
+			}
 			// The chapter id navigates to the whole chapter.
 			c.xrefIndex[ch.ID] = append(c.xrefIndex[ch.ID], xrefLoc{docID: doc.ID, chapterID: ch.ID, title: ch.Title, scope: "chapter"})
 			// Each section id navigates to that section within the chapter.
@@ -142,6 +148,9 @@ func (c *Corpus) Finish() {
 					c.df[w]++
 				}
 			}
+		}
+		for term := range seenTerms {
+			c.termDocs[term] = append(c.termDocs[term], doc.ID)
 		}
 	}
 }
@@ -261,6 +270,12 @@ func (c *Corpus) termsIn(text string) []string {
 // prose, in term order.
 func (c *Corpus) GlossaryForChapter(ch *Chapter) []GlossaryEntry {
 	return c.GlossaryFor(c.termsIn(ch.Prose))
+}
+
+// DocsUsing returns the ids of the documents whose chapters mention term, in
+// document order. An empty list means no document uses the term.
+func (c *Corpus) DocsUsing(term string) []string {
+	return c.termDocs[term]
 }
 
 // sortedGlossary returns the glossary keys, sorted, so that lookups and

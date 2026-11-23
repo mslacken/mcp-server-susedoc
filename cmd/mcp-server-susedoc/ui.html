@@ -132,6 +132,7 @@
   <a {{if or (eq .Page "read_document") (eq .Page "search_docs")}}class="active"{{end}} href="/search">Search</a>
   <a {{if eq .Page "find_command"}}class="active"{{end}} href="/command">Find command</a>
   <a {{if eq .Page "define_term"}}class="active"{{end}} href="/term">Define term</a>
+  <a {{if eq .Page "list_glossary"}}class="active"{{end}} href="/glossary">Glossary</a>
 </nav>
 
 <main>
@@ -141,6 +142,7 @@
     <a class="result-card tool" href="/search"><h2>Search</h2><p>Full-text ranked search over every chapter.</p></a>
     <a class="result-card tool" href="/command"><h2>Find command</h2><p>Locate documented shell commands by the words they contain.</p></a>
     <a class="result-card tool" href="/term"><h2>Define term</h2><p>Look up a glossary term or abbreviation.</p></a>
+    <a class="result-card tool" href="/glossary"><h2>Glossary</h2><p>Every term and definition, with the documents that use each term.</p></a>
   </div>
 {{end}}
 
@@ -149,6 +151,7 @@
 {{if eq .Page "search_docs"}}{{template "search_docs" .}}{{end}}
 {{if eq .Page "find_command"}}{{template "find_command" .}}{{end}}
 {{if eq .Page "define_term"}}{{template "define_term" .}}{{end}}
+{{if eq .Page "list_glossary"}}{{template "list_glossary" .}}{{end}}
 </main>
 </body>
 </html>

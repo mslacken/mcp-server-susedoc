@@ -210,6 +210,7 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 		"search_docs":    {"query": "install"},
 		"find_command":   {"pattern": "zypper"},
 		"define_term":    {"term": "CIB"},
+		"list_glossary":  {},
 	} {
 		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 		if err != nil || res.IsError {

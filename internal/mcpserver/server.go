@@ -95,6 +95,18 @@ type DefineTermOut struct {
 	Entries []docparse.GlossaryEntry `json:"entries"`
 }
 
+type ListGlossaryOut struct {
+	Entries []glossaryEntry `json:"entries"`
+}
+
+// glossaryEntry is a glossary term with its definition and the documents that
+// use it.
+type glossaryEntry struct {
+	Term   string   `json:"term"`
+	WhatIs string   `json:"whatis"`
+	Docs   []string `json:"docs,omitempty"`
+}
+
 func info(d *docparse.Document) documentInfo {
 	return documentInfo{ID: d.ID, Title: d.Title, Distro: d.Distro, Product: d.Product, Chapters: len(d.Chapters)}
 }
@@ -165,6 +177,16 @@ func FindCommand(c *docparse.Corpus, pattern string, docs []string) FindCommandO
 // optionally restricted to the documents in docs.
 func DefineTerm(c *docparse.Corpus, term string, docs []string) DefineTermOut {
 	return DefineTermOut{Entries: nonNil(c.DefineTerm(term, docs))}
+}
+
+// ListGlossary returns every glossary entry in term order, each with the ids of
+// the documents whose chapters mention it.
+func ListGlossary(c *docparse.Corpus) ListGlossaryOut {
+	entries := make([]glossaryEntry, 0, len(c.Glossary))
+	for _, e := range c.GlossaryEntries() {
+		entries = append(entries, glossaryEntry{Term: e.Term, WhatIs: e.WhatIs, Docs: c.DocsUsing(e.Term)})
+	}
+	return ListGlossaryOut{Entries: entries}
 }
 
 // corpusSummary is the shape of the corpus overview endpoint.
@@ -325,6 +347,15 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 		debugf("define_term term=%q docs=%q", in.Term, in.Docs)
 		out := DefineTerm(c, in.Term, in.Docs)
 		debugf("define_term result: %d entries", len(out.Entries))
+		return nil, out, nil
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_glossary",
+		Description: "List every glossary term and definition, with the documents that use each term.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, ListGlossaryOut, error) {
+		out := ListGlossary(c)
+		debugf("list_glossary result: %d entries", len(out.Entries))
 		return nil, out, nil
 	})
 

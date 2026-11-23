@@ -299,6 +299,7 @@ func serveWeb(c *docparse.Corpus) http.Handler {
 	mux.HandleFunc("/search", app.toolPage("search_docs", "Search"))
 	mux.HandleFunc("/command", app.toolPage("find_command", "Find command"))
 	mux.HandleFunc("/term", app.toolPage("define_term", "Define term"))
+	mux.HandleFunc("/glossary", app.toolPage("list_glossary", "Glossary"))
 
 	// ---- JSON API: the tool's structured output, as an MCP client gets it ----
 

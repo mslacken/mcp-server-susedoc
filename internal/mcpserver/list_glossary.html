@@ -1,0 +1,20 @@
+{{define "list_glossary"}}
+  <h2>Glossary</h2>
+  <p class="desc">Every glossary term and definition, with the documents that use each term.</p>
+  {{with tool "list_glossary" .Args}}
+    {{if .Error}}
+      <div class="empty">{{.Error}}</div>
+    {{else if .Out.entries}}
+      <div class="result-card">
+        <h2 style="margin:0 0 8px">Glossary &middot; {{len .Out.entries}} entr{{if eq (len .Out.entries) 1}}y{{else}}ies{{end}}</h2>
+        <dl class="gloss">{{range .Out.entries}}
+          <dt>{{esc .term}}</dt>
+          <dd>{{esc .whatis}}</dd>
+          <dd class="hint">Used in: {{if .docs}}{{range .docs}}<a href="/document/{{esc .}}">{{esc .}}</a> {{end}}{{else}}no document{{end}}</dd>
+        {{end}}</dl>
+      </div>
+    {{else}}
+      <div class="empty">The corpus has no glossary entries.</div>
+    {{end}}
+  {{end}}
+{{end}}
