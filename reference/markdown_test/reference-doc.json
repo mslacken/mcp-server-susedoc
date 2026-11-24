@@ -1,0 +1,142 @@
+{
+  "version": 3,
+  "document": {
+    "id": "reference-doc",
+    "title": "Reference Guide",
+    "summary": "Reference markdown document that exercises every feature of the mcp-server-susedoc markdown importer: front matter, chapters, sections, cross references, commands, glossary and legal notice.",
+    "distro": {
+      "name": "example distro",
+      "versions": [
+        "23.3"
+      ]
+    },
+    "product": {
+      "name": "example product",
+      "versions": [
+        "1.0",
+        "1.1"
+      ]
+    },
+    "chapters": [
+      {
+        "id": "front-matter",
+        "chapter_title": "Front matter",
+        "summary": "This chapter explains the metadata header of a markdown document. The header\nis a YAML block between two --- lines at the very top of the file. As YAML\nis a superset of JSON, the block may also hold a JSON object.",
+        "file": "reference.md",
+        "sections": [
+          {
+            "id": "recognized-keys",
+            "title": "Recognized keys",
+            "level": 1
+          },
+          {
+            "id": "json-header-example",
+            "title": "JSON header",
+            "level": 1
+          }
+        ],
+        "xrefs": [
+          "legal-notice"
+        ],
+        "text": "## Front matter\n\nThis chapter explains the metadata header of a markdown document. The header\nis a YAML block between two `---` lines at the very top of the file. As YAML\nis a superset of JSON, the block may also hold a JSON object.\n\n### Recognized keys\n\nThe importer reads these keys, all others (like `arch` above) are ignored:\n\n| Key | Field | Meaning |\n| ----- | ------- | --------- |\n| `id` | `Document.ID` | Document ID; without it the name of the directory, or of the file for a lone file, is used |\n| `title` | `Document.Title` | Used if the file has no level 1 heading; everything after a `\\|` is cut off |\n| `description` | `Document.Summary` | Abstract of the document; without it the lead of the first chapter is used |\n| `distro` | `Distro.Name` | Distribution the document applies to |\n| `version` | `Distro.Versions` | Version(s) of the distribution, a string or a list; quote them so YAML keeps them strings |\n| `product` | `Product.Name` | Specific product the document applies to, distinct from the distribution |\n| `product-version` | `Product.Versions` | Version(s) of the product, a string or a list |\n\nIf `distro` or `version` is missing, an `Applies to DISTRO VERSION` line\nwithin the first lines after the header is used instead.\n\nThe license is not a front matter key, it is taken from the\n[Legal Notice](#legal-notice) chapter.\n\n### JSON header {#json-header-example}\n\nThe same header written as JSON:\n\n```json\n---\n{\"title\": \"Reference Guide\", \"description\": \"Reference markdown document.\", \"distro\": \"openSUSE Leap\", \"version\": \"16.0\", \"product\": \"example product\", \"product-version\": [\"1.0\", \"1.1\"]}\n---\n```",
+        "prose": "Front matter\nThis chapter explains the metadata header of a markdown document. The header\nis a YAML block between two  lines at the very top of the file. As YAML\nis a superset of JSON, the block may also hold a JSON object.\nRecognized keys\nThe importer reads these keys, all others (like  above) are ignored:\nKey\nField\nMeaning\n\n\n\n\n\nDocument ID; without it the name of the directory, or of the file for a lone file, is used\n\n\nUsed if the file has no level 1 heading; everything after a  is cut off\n\n\nAbstract of the document; without it the lead of the first chapter is used\n\n\nDistribution the document applies to\n\n\nVersion(s) of the distribution, a string or a list; quote them so YAML keeps them strings\n\n\nSpecific product the document applies to, distinct from the distribution\n\n\nVersion(s) of the product, a string or a list\nIf  or  is missing, an  line\nwithin the first lines after the header is used instead.\nThe license is not a front matter key, it is taken from the\nLegal Notice chapter.\nJSON header\nThe same header written as JSON:\n"
+      },
+      {
+        "id": "document-structure",
+        "chapter_title": "Document structure",
+        "summary": "Every directory of markdown files forms one document.\nA file that is read on its own forms a document named after\nthe file.",
+        "file": "reference.md",
+        "sections": [
+          {
+            "id": "chapters",
+            "title": "Chapters",
+            "level": 1
+          },
+          {
+            "id": "sections",
+            "title": "Sections",
+            "level": 1
+          },
+          {
+            "id": "numbered-sections",
+            "number": "3.2.1",
+            "title": "Numbered sections",
+            "level": 2
+          }
+        ],
+        "text": "## Document structure\n\nEvery directory of markdown files forms one document.\nA file that is read on its own forms a document named after\nthe file.\n\n### Chapters\n\nIf a file has a single level 1 heading, every level 2 heading starts a\nchapter. With several level 1 headings, they become the chapters instead.\nLeading chapter numbers like `3.1` are removed from the title. The chapter\nID is the slug of the title, made unique within the document.\n\nThe `file` of a chapter is the file it was written in, relative to the\ndirectory that was read.\n\n### Sections\n\nHeadings below the chapter heading stay part of the chapter's markdown. The\nparagraphs between the chapter heading and the first of them form the\nsummary of the chapter.\n\nEvery such heading is also listed as a section of the chapter:\n\n| Field | Value |\n| ----- | ----- |\n| `id` | The explicit `{#id}` of the heading, else the slug of the title |\n| `number` | A leading section number like `3.2.1`, removed from the title |\n| `title` | The heading text |\n| `level` | Depth below the chapter heading, `1` is a direct subsection |\n| `file` | Not set for markdown, sections always come from the chapter's file |\n\n#### 3.2.1 Numbered sections\n\nThis heading becomes the section `numbered-sections` with the number\n`3.2.1` on level 2.",
+        "prose": "Document structure\nEvery directory of markdown files forms one document.\nA file that is read on its own forms a document named after\nthe file.\nChapters\nIf a file has a single level 1 heading, every level 2 heading starts a\nchapter. With several level 1 headings, they become the chapters instead.\nLeading chapter numbers like  are removed from the title. The chapter\nID is the slug of the title, made unique within the document.\nThe  of a chapter is the file it was written in, relative to the\ndirectory that was read.\nSections\nHeadings below the chapter heading stay part of the chapter's markdown. The\nparagraphs between the chapter heading and the first of them form the\nsummary of the chapter.\nEvery such heading is also listed as a section of the chapter:\nField\nValue\n\nThe explicit  of the heading, else the slug of the title\n\nA leading section number like , removed from the title\n\nThe heading text\n\nDepth below the chapter heading,  is a direct subsection\n\nNot set for markdown, sections always come from the chapter's file\n3.2.1 Numbered sections\nThis heading becomes the section  with the number\n on level 2.\n"
+      },
+      {
+        "id": "cross-references",
+        "chapter_title": "Cross references",
+        "summary": "Links to an anchor of the corpus are cross references of the chapter they\nare written in. Their targets are listed as xrefs of the chapter.",
+        "file": "reference.md",
+        "sections": [
+          {
+            "id": "link-targets",
+            "title": "Link targets",
+            "level": 1
+          },
+          {
+            "id": "unresolved-targets",
+            "title": "Unresolved targets",
+            "level": 1
+          }
+        ],
+        "xrefs": [
+          "commands",
+          "json-header-example",
+          "sections",
+          "no-such-target"
+        ],
+        "text": "## Cross references\n\nLinks to an anchor of the corpus are cross references of the chapter they\nare written in. Their targets are listed as `xrefs` of the chapter.\n\n### Link targets\n\nA link `[text](#target)` adds `target` to the xrefs. The target is the ID\nof a chapter, like [Commands](#commands), or of a section, like the\n[JSON header](#json-header-example) or [Sections](#sections). Every\ntarget is listed once, in order of its first appearance, so a second link\nto [Commands](#commands) adds nothing.\n\nLinks to other files or web pages, like\n[openSUSE](https://www.opensuse.org/), are no cross references.\n\n### Unresolved targets\n\nA target that is no chapter or section anywhere in the corpus, like\n[this one](#no-such-target), is still listed. `read_document` reports it as\nunresolved.",
+        "prose": "Cross references\nLinks to an anchor of the corpus are cross references of the chapter they\nare written in. Their targets are listed as  of the chapter.\nLink targets\nA link  adds  to the xrefs. The target is the ID\nof a chapter, like Commands, or of a section, like the\nJSON header or Sections. Every\ntarget is listed once, in order of its first appearance, so a second link\nto Commands adds nothing.\nLinks to other files or web pages, like\nopenSUSE, are no cross references.\nUnresolved targets\nA target that is no chapter or section anywhere in the corpus, like\nthis one, is still listed.  reports it as\nunresolved.\n"
+      },
+      {
+        "id": "commands",
+        "chapter_title": "Commands",
+        "summary": "Shell commands are taken from code blocks.",
+        "file": "reference.md",
+        "commands": [
+          "sudo zypper refresh",
+          "zypper search --installed-only kernel",
+          "systemctl enable --now sshd.service",
+          "journalctl -u sshd.service --since today",
+          "fooshell configure",
+          "fooshell configure show",
+          "fooshell configure commit"
+        ],
+        "sections": [
+          {
+            "id": "prompts",
+            "title": "Prompts",
+            "level": 1
+          },
+          {
+            "id": "interactive-shells",
+            "title": "Interactive shells",
+            "level": 1
+          }
+        ],
+        "text": "## Commands\n\nShell commands are taken from code blocks.\n\n### Prompts\n\nA code block is recognized as command if a line contains following runes followed space rune\n\n- `$`\n- `#`\n- `>`\nregardless what characters are used before the command rune and the `#` can end a command.\nThis can be obtained by following regular expression `s/.*[$#>] \\(.[^#]\\)/\\1/`.\n\nExample expressions are:\n\n```bash\n> sudo zypper refresh\ntux@leap> zypper search --installed-only kernel\n# systemctl enable --now sshd.service\n$ journalctl -u sshd.service \\\n  --since today\n# A comment, not a command\n```\n\nThe commands found above are\n\n- `sudo zypper refresh`\n- `zypper search --installed-only kernel`\n- `systemctl enable --now sshd.service`\n- `journalctl -u sshd.service --since today`\n\n### Interactive shells\n\n```fooshell\nfooshell# configure\nfooshell:configure# show\nfooshell:configure# commit\n```\n\nThese must be prefix by their shell commands and become:\n\n- `fooshell configure`\n- `fooshell configure show`\n- `fooshell configure commit`",
+        "prose": "Commands\nShell commands are taken from code blocks.\nPrompts\nA code block is recognized as command if a line contains following runes followed space rune\n\n\n\nregardless what characters are used before the command rune and the  can end a command.\nThis can be obtained by following regular expression .\nExample expressions are:\nThe commands found above are\n\n\n\n\nInteractive shells\nThese must be prefix by their shell commands and become:\n\n\n\n"
+      }
+    ],
+    "license": "GFDL-1.2-no-invariants-only OR GFDL-1.3-no-invariants-only"
+  },
+  "glossary": [
+    {
+      "term": "Glossary is defined by chapter",
+      "whatis": "The metadata header at the top of a markdown file, written in YAML or JSON."
+    },
+    {
+      "term": "YaST",
+      "whatis": "The installation and configuration tool of openSUSE and SUSE Linux\nEnterprise."
+    },
+    {
+      "term": "Zypper",
+      "whatis": "The command line package manager of openSUSE and SUSE Linux Enterprise."
+    }
+  ]
+}
