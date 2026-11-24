@@ -16,10 +16,13 @@ type Importer struct{}
 // Name returns "markdown".
 func (Importer) Name() string { return "markdown" }
 
-// Match reports whether p is a *.md or *.markdown file.
+// Match reports whether p is a *.md, *.markdown or *.mdx file.
 func (Importer) Match(p string) bool {
-	ext := strings.ToLower(filepath.Ext(p))
-	return ext == ".md" || ext == ".markdown"
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".md", ".markdown", ".mdx":
+		return true
+	}
+	return false
 }
 
 // Import reads the files and groups them into documents.

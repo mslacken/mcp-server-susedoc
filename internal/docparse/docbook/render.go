@@ -309,9 +309,17 @@ func (r *renderer) block(n *xnode, level, depth int) [][]string {
 		bs = append(bs, r.blocks(r.without(n.kids, "title", "info", "listitem"), level, depth)...)
 		return append(bs, r.list(r.elems(n.kids, "listitem"), n.name == "orderedlist", level, depth))
 	case "calloutlist":
-		return append(r.titled(n, ""), r.calloutList(n, level, depth))
+		bs := r.titled(n, "")
+		bs = append(bs, r.blocks(r.without(n.kids, "title", "titleabbrev", "info", "callout"), level, depth)...)
+		return append(bs, r.calloutList(n, level, depth))
 	case "variablelist", "glossary", "glossdiv", "glosslist":
-		return append(r.titled(n, ""), r.defList(n, level, depth))
+		bs := r.titled(n, "")
+		bs = append(bs, r.blocks(r.without(n.kids, "title", "titleabbrev", "info", "varlistentry", "glossentry", "glossdiv"), level, depth)...)
+		bs = append(bs, r.defList(n, level, depth))
+		for _, div := range r.elems(n.kids, "glossdiv") {
+			bs = append(bs, r.block(div, level, depth)...)
+		}
+		return bs
 	case "glossentry":
 		return [][]string{r.defList(&xnode{kids: []*xnode{n}}, level, depth)}
 	case "simplelist":
@@ -349,6 +357,7 @@ func (r *renderer) block(n *xnode, level, depth int) [][]string {
 		return nil
 	case "qandaset", "qandadiv":
 		bs := r.titled(n, "")
+		bs = append(bs, r.blocks(r.without(n.kids, "title", "titleabbrev", "info", "qandaentry", "qandadiv"), level, depth)...)
 		for _, k := range r.flat(n.kids) {
 			switch k.name {
 			case "qandaentry":
@@ -574,7 +583,7 @@ func (r *renderer) codeBlock(n *xnode) []string {
 		lines = lines[1:]
 	}
 	info := n.attr["language"]
-	if info == "" && len(n.find("prompt")) > 0 {
+	if len(n.find("prompt")) > 0 {
 		info = "console"
 	}
 	fence := "```"

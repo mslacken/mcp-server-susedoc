@@ -3,6 +3,7 @@
 package markdown
 
 import (
+	"bytes"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,6 +29,7 @@ func ReadFile(p, root string) ([]Segment, error) {
 	if err != nil {
 		return nil, err
 	}
+	data = normalizeNewlines(data)
 	if root == "" {
 		return SplitSources(data, p), nil
 	}
@@ -42,6 +44,10 @@ func ReadFile(p, root string) ([]Segment, error) {
 	s := newSegment(filepath.ToSlash(rel), p, strings.Split(string(data), "\n"))
 	s.group = filepath.Dir(p)
 	return []Segment{s}, nil
+}
+
+func normalizeNewlines(data []byte) []byte {
+	return bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 }
 
 func isCombined(data []byte) bool {
@@ -84,7 +90,7 @@ var sourceMarker = regexp.MustCompile(`^<!-- Source: (.+?) -->\s*$`)
 // SplitSources splits the markdown in data into one segment per <!-- Source: -->
 // marker. For non combined input it returns a single segment named name.
 func SplitSources(data []byte, name string) []Segment {
-	lines := strings.Split(string(data), "\n")
+	lines := strings.Split(string(normalizeNewlines(data)), "\n")
 	var segs []Segment
 	file, start, combined := name, 0, false
 	for i, ln := range lines {
@@ -113,60 +119,119 @@ func newSourceSegment(file, name string, lines []string) Segment {
 }
 
 func newSegment(file, name string, lines []string) Segment {
+	s := Segment{file: file, name: name}
+	if len(lines) > 0 && (lines[0] == "---" || lines[0] == "+++") {
+		for j := 1; j < len(lines); j++ {
+			if lines[j] != lines[0] {
+				continue
+			}
+			text := strings.Join(lines[1:j], "\n")
+			if lines[0] == "+++" {
+				s.meta, s.body = tomlFrontMatter(text), j+1
+			} else if yaml.Unmarshal([]byte(text), &s.meta) == nil {
+				s.body = j + 1
+			}
+			break
+		}
+	}
 	// drop the "\n---\n\n" separator combine.sh puts before the next marker
-	for len(lines) > 0 {
+	for len(lines) > s.body {
 		t := strings.TrimSpace(lines[len(lines)-1])
 		if t != "" && t != "---" {
 			break
 		}
 		lines = lines[:len(lines)-1]
 	}
-	s := Segment{file: file, name: name, lines: lines}
-	if len(lines) > 0 && lines[0] == "---" {
-		for j := 1; j < len(lines); j++ {
-			if lines[j] == "---" {
-				if yaml.Unmarshal([]byte(strings.Join(lines[1:j], "\n")), &s.meta) == nil {
-					s.body = j + 1
-				}
-				break
+	s.lines = lines
+	return s
+}
+
+var reTOMLString = regexp.MustCompile(`^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')\s*(?:#.*)?$`)
+
+func tomlFrontMatter(text string) map[string]any {
+	meta := map[string]any{}
+	for _, ln := range strings.Split(text, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "[") {
+			break
+		}
+		if m := reTOMLString.FindStringSubmatch(ln); m != nil {
+			v := m[3]
+			if strings.HasPrefix(strings.TrimSpace(ln[strings.Index(ln, "=")+1:]), `"`) {
+				v = strings.NewReplacer(`\"`, `"`, `\\`, `\`).Replace(m[2])
 			}
+			meta[m[1]] = v
 		}
 	}
-	return s
+	return meta
 }
 
 type heading struct {
 	level int
 	text  string
+	id    string
 	idx   int // index into segment.lines
 }
 
 var (
-	reATX   = regexp.MustCompile(`^(#{1,6})\s+(.*?)\s*#*\s*$`)
-	reFence = regexp.MustCompile("^\\s*(```|~~~)")
+	reATX          = regexp.MustCompile(`^(#{1,6})\s+(.*?)\s*#*\s*$`)
+	reFence        = regexp.MustCompile("^\\s*(```|~~~)")
+	reSetext       = regexp.MustCompile(`^ {0,3}(=+|-+)\s*$`)
+	reNotParagraph = regexp.MustCompile(`^\s*(?:[-*+]\s|\d+[.)]\s|>|#|\||<|` + "```" + `|~~~)`)
 )
 
 func headings(s Segment) []heading {
 	var hs []heading
 	fenced := false
 	for i := s.body; i < len(s.lines); i++ {
-		if reFence.MatchString(s.lines[i]) {
+		ln := s.lines[i]
+		if reFence.MatchString(ln) {
 			fenced = !fenced
 			continue
 		}
 		if fenced {
 			continue
 		}
-		if m := reATX.FindStringSubmatch(s.lines[i]); m != nil {
-			hs = append(hs, heading{level: len(m[1]), text: m[2], idx: i})
+		var h heading
+		if m := reATX.FindStringSubmatch(ln); m != nil {
+			h = heading{level: len(m[1]), text: m[2], idx: i}
+		} else if i+1 < len(s.lines) && reSetext.MatchString(s.lines[i+1]) && strings.TrimSpace(ln) != "" &&
+			!reNotParagraph.MatchString(ln) && (i == s.body || strings.TrimSpace(s.lines[i-1]) == "") {
+			level := 2
+			if strings.HasPrefix(strings.TrimSpace(s.lines[i+1]), "=") {
+				level = 1
+			}
+			h = heading{level: level, text: strings.TrimSpace(ln), idx: i}
+			i++
+		} else {
+			continue
 		}
+		if m := reHeadingID.FindStringSubmatch(h.text); m != nil {
+			h.id, h.text = m[1], strings.TrimSpace(strings.TrimSuffix(h.text, m[0]))
+		}
+		hs = append(hs, h)
 	}
 	return hs
 }
 
+func pageTitle(s Segment, hs []heading) string {
+	var h1 []string
+	for _, h := range hs {
+		if h.level == 1 {
+			h1 = append(h1, h.text)
+		}
+	}
+	if len(h1) == 1 {
+		return h1[0]
+	}
+	if t := reTitleSuffix.ReplaceAllString(metaString(s.meta, "title"), ""); t != "" {
+		return t
+	}
+	return strings.TrimSuffix(path.Base(s.file), path.Ext(s.file))
+}
+
 var (
 	reHistory     = regexp.MustCompile(`(?i)^revision history`)
-	reChapterNum  = regexp.MustCompile(`^\d+(?:\.\d+)*\s*`)
+	reChapterNum  = regexp.MustCompile(`^\d{1,3}(?:\.\d{1,3})*\.?\s+`)
 	reTitleSuffix = regexp.MustCompile(`\s*\|.*$`)
 	reAppliesTo   = regexp.MustCompile(`^(?:Applies to )?(.+?) (\d+(?:\.\d+)*(?: SP\d+)?)$`)
 	// explicit heading id: "## JSON header {#json-header}"
@@ -245,6 +310,7 @@ func buildDocument(segs []Segment) docparse.Document {
 	var glossary []docparse.GlossaryEntry
 	var legal, licenseFile []string
 	var description string
+	intros := map[int]bool{}
 	for _, s := range segs {
 		addDistro(&doc, s)
 		if doc.ID == "" {
@@ -263,7 +329,7 @@ func buildDocument(segs []Segment) docparse.Document {
 			glossary = append(glossary, parseGlossary(s.lines[s.body:])...)
 		case strings.HasPrefix(base, "rh-") || reHistory.MatchString(first):
 		default:
-			if doc.Title == "" {
+			if doc.Title == "" && hasContent(s) {
 				description = metaString(s.meta, "description")
 				doc.Title = reTitleSuffix.ReplaceAllString(metaString(s.meta, "title"), "")
 				for _, h := range hs {
@@ -272,8 +338,15 @@ func buildDocument(segs []Segment) docparse.Document {
 						break
 					}
 				}
+				if doc.Title == "" {
+					doc.Title = pageTitle(s, hs)
+				}
 			}
-			l, g := addChapters(&doc, s, hs)
+			n := len(doc.Chapters)
+			l, g, intro := addChapters(&doc, s, hs)
+			if intro {
+				intros[n] = true
+			}
 			legal = append(legal, l...)
 			glossary = append(glossary, g...)
 		}
@@ -284,11 +357,30 @@ func buildDocument(segs []Segment) docparse.Document {
 	}
 	doc.License = docparse.License(strings.Join(legal, "\n"), strings.Join(licenseFile, "\n"))
 	ids := map[string]int{}
-	for i := range doc.Chapters {
-		doc.Chapters[i].ID = docparse.UniqueID(ids, docparse.Slug(doc.Chapters[i].Title))
+	for _, intro := range []bool{false, true} {
+		for i := range doc.Chapters {
+			if intros[i] != intro {
+				continue
+			}
+			ch := &doc.Chapters[i]
+			id := ch.ID
+			if id == "" {
+				id = docparse.Slug(ch.Title)
+			}
+			ch.ID = docparse.UniqueID(ids, id)
+		}
 	}
 	doc.Glossary = glossary
 	return doc
+}
+
+func hasContent(s Segment) bool {
+	for _, ln := range s.lines[s.body:] {
+		if strings.TrimSpace(ln) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // addDistro sets the distribution and product of doc from the front matter of
@@ -324,18 +416,82 @@ func addVersions(name *string, versions *[]string, newName string, newVersions [
 // addChapters appends one Chapter per top level section of s and returns the
 // text of the legal notice section(s) and the glossary sections, which are not
 // treated as chapters.
-func addChapters(doc *docparse.Document, s Segment, hs []heading) ([]string, []docparse.GlossaryEntry) {
-	level, h1 := 2, 0
+func addChapters(doc *docparse.Document, s Segment, hs []heading) ([]string, []docparse.GlossaryEntry, bool) {
+	h1 := 0
 	for _, h := range hs {
 		if h.level == 1 {
 			h1++
 		}
 	}
+	level := 0
 	if h1 > 1 {
 		level = 1
+	} else {
+		for _, h := range hs {
+			if h.level > 1 && (level == 0 || h.level < level) {
+				level = h.level
+			}
+		}
 	}
+	first := len(s.lines)
+	for _, h := range hs {
+		if h.level == level {
+			first = h.idx
+			break
+		}
+	}
+
 	var legal []string
 	var glossary []docparse.GlossaryEntry
+	add := func(title, id string, start, end int) {
+		for end > start+1 && strings.TrimSpace(s.lines[end-1]) == "" {
+			end--
+		}
+		section := s.lines[start:end]
+		switch {
+		case docparse.IsLegalNotice(title):
+			legal = append(legal, section...)
+			return
+		case glossaryHeading.MatchString(title):
+			glossary = append(glossary, parseGlossary(section)...)
+			return
+		}
+		a := Analyze(section)
+		var sections []docparse.Section
+		for _, n := range hs {
+			if n.idx > start && n.idx < end && n.level > level {
+				sections = append(sections, newSection(n, n.level-level))
+			}
+		}
+		doc.Chapters = append(doc.Chapters, docparse.Chapter{
+			ID:       id,
+			Title:    title,
+			File:     s.file,
+			Commands: a.Commands,
+			Sections: sections,
+			Xrefs:    a.Xrefs,
+			Summary:  a.Lead,
+			LinesKey: s.key(),
+			Start:    uint(start + 1),
+			End:      uint(end),
+			Prose:    a.Prose,
+		})
+	}
+
+	intro := false
+	if start, ok := introStart(s, hs, first); ok {
+		n := len(doc.Chapters)
+		id := ""
+		if level != 1 {
+			for _, h := range hs {
+				if h.level == 1 && h.idx < first {
+					id = h.id
+				}
+			}
+		}
+		add(pageTitle(s, hs), id, start, first)
+		intro = len(doc.Chapters) > n
+	}
 	for i, h := range hs {
 		if h.level != level {
 			continue
@@ -347,48 +503,57 @@ func addChapters(doc *docparse.Document, s Segment, hs []heading) ([]string, []d
 				break
 			}
 		}
-		for end > h.idx+1 && strings.TrimSpace(s.lines[end-1]) == "" {
-			end--
-		}
-		section := s.lines[h.idx:end]
 		title := reChapterNum.ReplaceAllString(h.text, "")
-		switch {
-		case docparse.IsLegalNotice(title):
-			legal = append(legal, section...)
-			continue
-		case glossaryHeading.MatchString(title):
-			glossary = append(glossary, parseGlossary(section)...)
-			continue
+		if title == "" {
+			title = h.text
 		}
-		a := Analyze(section)
-		var sections []docparse.Section
-		for _, n := range hs[i+1:] {
-			if n.idx >= end {
-				break
-			}
-			sections = append(sections, newSection(n, n.level-level))
-		}
-		doc.Chapters = append(doc.Chapters, docparse.Chapter{
-			Title:    title,
-			File:     s.file,
-			Commands: a.Commands,
-			Sections: sections,
-			Xrefs:    a.Xrefs,
-			Summary:  a.Lead,
-			LinesKey: s.key(),
-			Start:    uint(h.idx + 1),
-			End:      uint(end),
-			Prose:    a.Prose,
-		})
+		add(title, h.id, h.idx, end)
 	}
-	return legal, glossary
+	return legal, glossary, intro
+}
+
+var (
+	reMDXImport = regexp.MustCompile(`^(?:import|export)\s`)
+	reComment   = regexp.MustCompile(`^<!--.*-->$`)
+	reMarkup    = regexp.MustCompile(`^<|\bhref="`)
+)
+
+func introStart(s Segment, hs []heading, first int) (start int, ok bool) {
+	start = -1
+	skip := map[int]bool{}
+	for _, h := range hs {
+		if h.idx >= first {
+			break
+		}
+		if h.level == 1 {
+			if start < 0 {
+				start = h.idx
+			}
+			skip[h.idx] = true
+			if h.idx+1 < len(s.lines) && reSetext.MatchString(s.lines[h.idx+1]) {
+				skip[h.idx+1] = true
+			}
+		}
+	}
+	for i := s.body; i < first; i++ {
+		t := strings.TrimSpace(s.lines[i])
+		if skip[i] || t == "" || reMDXImport.MatchString(t) || reComment.MatchString(t) || reMarkup.MatchString(t) ||
+			(strings.HasPrefix(t, "Applies to ") && reAppliesTo.MatchString(t)) {
+			continue
+		}
+		if start < 0 || i < start {
+			start = i
+		}
+		return start, true
+	}
+	return 0, false
 }
 
 // newSection returns the section of the heading h, level deep below the
 // chapter heading. Its id is the explicit {#id} of the heading, or else the
 // slug of its title without the section number.
 func newSection(h heading, level int) docparse.Section {
-	sec := docparse.Section{Title: h.text, Level: level}
+	sec := docparse.Section{Title: h.text, Level: level, ID: h.id}
 	if m := reHeadingID.FindStringSubmatch(sec.Title); m != nil {
 		sec.ID = m[1]
 		sec.Title = reHeadingID.ReplaceAllString(sec.Title, "")
