@@ -169,6 +169,10 @@ var (
 	reChapterNum  = regexp.MustCompile(`^\d+(?:\.\d+)*\s*`)
 	reTitleSuffix = regexp.MustCompile(`\s*\|.*$`)
 	reAppliesTo   = regexp.MustCompile(`^(?:Applies to )?(.+?) (\d+(?:\.\d+)*(?: SP\d+)?)$`)
+	// explicit heading id: "## JSON header {#json-header}"
+	reHeadingID = regexp.MustCompile(`\s*\{#([^}\s]+)\}$`)
+	// leading section number: "3.2.1 Numbered sections"
+	reSectionNum = regexp.MustCompile(`^(\d+(?:\.\d+)*)\.?\s+`)
 )
 
 func metaString(meta map[string]any, key string) string {
@@ -178,6 +182,26 @@ func metaString(meta map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+// metaStrings returns the value of key in meta as a list: a single string or
+// the strings of a list.
+func metaStrings(meta map[string]any, key string) []string {
+	switch v := meta[key].(type) {
+	case string:
+		if s := metaString(meta, key); s != "" {
+			return []string{s}
+		}
+	case []any:
+		var out []string
+		for _, e := range v {
+			if s, ok := e.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, strings.Join(strings.Fields(s), " "))
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // BuildDocuments turns segments into a finished corpus, see Build.
@@ -204,21 +228,28 @@ func Build(segs []Segment) docparse.Part {
 		p.Lines[s.key()] = s.lines
 	}
 	for _, g := range order {
-		doc, glossary := buildDocument(groups[g])
-		doc.ID = documentID(groups[g][0].file)
+		doc := buildDocument(groups[g])
+		if doc.ID == "" {
+			doc.ID = documentID(groups[g][0].file)
+		}
 		p.Documents = append(p.Documents, doc)
-		p.Glossary = append(p.Glossary, glossary...)
+		p.Glossary = append(p.Glossary, doc.Glossary...)
 	}
 	return p
 }
 
-func buildDocument(segs []Segment) (docparse.Document, []docparse.GlossaryEntry) {
+// buildDocument turns the segments of one directory into a Document. Its id
+// is only set if a front matter names it.
+func buildDocument(segs []Segment) docparse.Document {
 	doc := docparse.Document{Chapters: []docparse.Chapter{}}
 	var glossary []docparse.GlossaryEntry
 	var legal, licenseFile []string
 	var description string
 	for _, s := range segs {
-		addDistro(&doc.Distro, s)
+		addDistro(&doc, s)
+		if doc.ID == "" {
+			doc.ID = metaString(s.meta, "id")
+		}
 		hs := headings(s)
 		first := ""
 		if len(hs) > 0 {
@@ -256,25 +287,37 @@ func buildDocument(segs []Segment) (docparse.Document, []docparse.GlossaryEntry)
 	for i := range doc.Chapters {
 		doc.Chapters[i].ID = docparse.UniqueID(ids, docparse.Slug(doc.Chapters[i].Title))
 	}
-	return doc, glossary
+	doc.Glossary = glossary
+	return doc
 }
 
-func addDistro(d *docparse.Distro, s Segment) {
-	product, version := metaString(s.meta, "product"), metaString(s.meta, "version")
-	if product == "" || version == "" {
-		// fall back to the "Applies to PRODUCT VERSION" line below the front matter
+// addDistro sets the distribution and product of doc from the front matter of
+// s, see addVersions.
+func addDistro(doc *docparse.Document, s Segment) {
+	distro, versions := metaString(s.meta, "distro"), metaStrings(s.meta, "version")
+	if distro == "" || len(versions) == 0 {
+		// fall back to the "Applies to DISTRO VERSION" line below the front matter
 		for i := s.body; i < len(s.lines) && i < s.body+4; i++ {
 			if m := reAppliesTo.FindStringSubmatch(strings.TrimSpace(s.lines[i])); m != nil && strings.HasPrefix(s.lines[i], "Applies to") {
-				product, version = m[1], m[2]
+				distro, versions = m[1], []string{m[2]}
 				break
 			}
 		}
 	}
-	if d.Name == "" {
-		d.Name = product
+	addVersions(&doc.Distro.Name, &doc.Distro.Versions, distro, versions)
+	addVersions(&doc.Product.Name, &doc.Product.Versions, metaString(s.meta, "product"), metaStrings(s.meta, "product-version"))
+}
+
+// addVersions sets *name to newName unless it is set already and adds the
+// new versions to *versions.
+func addVersions(name *string, versions *[]string, newName string, newVersions []string) {
+	if *name == "" {
+		*name = newName
 	}
-	if version != "" && !slices.Contains(d.Versions, version) {
-		d.Versions = append(d.Versions, version)
+	for _, v := range newVersions {
+		if !slices.Contains(*versions, v) {
+			*versions = append(*versions, v)
+		}
 	}
 }
 
@@ -318,10 +361,19 @@ func addChapters(doc *docparse.Document, s Segment, hs []heading) ([]string, []d
 			continue
 		}
 		a := Analyze(section)
+		var sections []docparse.Section
+		for _, n := range hs[i+1:] {
+			if n.idx >= end {
+				break
+			}
+			sections = append(sections, newSection(n, n.level-level))
+		}
 		doc.Chapters = append(doc.Chapters, docparse.Chapter{
 			Title:    title,
 			File:     s.file,
 			Commands: a.Commands,
+			Sections: sections,
+			Xrefs:    a.Xrefs,
 			Summary:  a.Lead,
 			LinesKey: s.key(),
 			Start:    uint(h.idx + 1),
@@ -330,6 +382,25 @@ func addChapters(doc *docparse.Document, s Segment, hs []heading) ([]string, []d
 		})
 	}
 	return legal, glossary
+}
+
+// newSection returns the section of the heading h, level deep below the
+// chapter heading. Its id is the explicit {#id} of the heading, or else the
+// slug of its title without the section number.
+func newSection(h heading, level int) docparse.Section {
+	sec := docparse.Section{Title: h.text, Level: level}
+	if m := reHeadingID.FindStringSubmatch(sec.Title); m != nil {
+		sec.ID = m[1]
+		sec.Title = reHeadingID.ReplaceAllString(sec.Title, "")
+	}
+	if m := reSectionNum.FindStringSubmatch(sec.Title); m != nil {
+		sec.Number = m[1]
+		sec.Title = sec.Title[len(m[0]):]
+	}
+	if sec.ID == "" {
+		sec.ID = docparse.Slug(sec.Title)
+	}
+	return sec
 }
 
 func parseGlossary(lines []string) []docparse.GlossaryEntry {

@@ -58,7 +58,7 @@ type dumpDocument struct {
 }
 
 // dumpFile is one file of a dump: a single document with the glossary entries
-// its chapters mention.
+// it defines or its chapters mention.
 type dumpFile struct {
 	Version  int             `json:"version"`
 	Document dumpDocument    `json:"document"`
@@ -105,7 +105,8 @@ func (c *Corpus) Export(dir string) error {
 }
 
 // DumpDocument writes the document d of the corpus to w in the dump format,
-// together with the glossary entries mentioned in its chapters, so that the
+// together with the glossary entries it defines or its chapters mention, in
+// term order, so that the
 // file can be read back on its own, see Load. Finish must have been called.
 func (c *Corpus) DumpDocument(w io.Writer, d *Document) error {
 	out := dumpFile{Version: DumpVersion, Document: dumpDocument{
@@ -113,6 +114,9 @@ func (c *Corpus) DumpDocument(w io.Writer, d *Document) error {
 		License: d.License, Chapters: make([]dumpChapter, 0, len(d.Chapters)),
 	}}
 	var terms []string
+	for _, e := range d.Glossary {
+		terms = append(terms, e.Term)
+	}
 	for j := range d.Chapters {
 		ch := &d.Chapters[j]
 		out.Document.Chapters = append(out.Document.Chapters, dumpChapter{
@@ -122,8 +126,9 @@ func (c *Corpus) DumpDocument(w io.Writer, d *Document) error {
 		})
 		terms = append(terms, c.termsIn(ch.Prose)...)
 	}
-	slices.Sort(terms)
-	out.Glossary = c.GlossaryFor(slices.Compact(terms))
+	slices.SortFunc(terms, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
+	terms = slices.CompactFunc(terms, strings.EqualFold)
+	out.Glossary = c.GlossaryFor(terms)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
@@ -242,7 +247,7 @@ func loadFile(r io.Reader, offset int) (Part, error) {
 	d := &in.Document
 	doc := Document{
 		ID: d.ID, Title: d.Title, Summary: d.Summary, Distro: d.Distro, Product: d.Product,
-		License: d.License, Chapters: make([]Chapter, 0, len(d.Chapters)),
+		License: d.License, Glossary: in.Glossary, Chapters: make([]Chapter, 0, len(d.Chapters)),
 	}
 	p := Part{Lines: map[string][]string{}, Glossary: in.Glossary}
 	for j := range d.Chapters {

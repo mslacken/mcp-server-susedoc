@@ -101,6 +101,7 @@ func (l *Loader) Read(name string) (docparse.Part, error) {
 		return docparse.Part{}, err
 	}
 	doc.ID = dcDocID(name)
+	doc.Glossary = glossary
 	return docparse.Part{
 		Documents: []docparse.Document{doc},
 		Glossary:  glossary,

@@ -25,7 +25,7 @@ const sample = `# Combined Documentation
 ---
 title: Guide
 description: A sample guide
-product: Sample Product
+distro: Sample Product
 version: "1.0"
 ---
 

@@ -128,13 +128,22 @@ Shell commands are taken from code blocks.
 
 ### Prompts
 
-A code block is recognized as command if a line contains following runes followed space rune
+A line of a code block is a command if it starts with a prompt followed by
+white space. Lines without a prompt are output and are ignored. A prompt is
 
-- `$`
-- `#`
-- `>`
-regardless what characters are used before the command rune and the `#` can end a command.
-This can be obtained by following regular expression `s/.*[$#>] \(.[^#]\)/\1/`.
+- `$` or `>`, optionally preceded by a host name and a `user@`, like
+  `tux@leap>`
+- `#` at the start of the line; the command must start with a lower case
+  letter, a digit or one of `_./-`, so a comment like `# A comment` is no
+  command
+
+This can be obtained by the following regular expressions:
+
+- `s/^([[:alnum:]_.-]+@)?[[:alnum:]_.-]*[$>][[:space:]]+([^[:space:]].*)$/\2/`
+- `s/^#[[:space:]]+([a-z0-9_./-]+([[:space:]].*)?)$/\1/`
+
+A command ending in `\` is continued on the next line. Commands of a
+single word, not counting a leading `sudo`, are dropped.
 
 Example expressions are:
 
