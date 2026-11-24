@@ -3,11 +3,13 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"mcp-server-susedoc/internal/docparse"
 	"mcp-server-susedoc/internal/docparse/markdown"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // sampleCorpus is a small corpus with one document (two chapters, a command)
@@ -99,29 +101,21 @@ func TestWebPagesRender(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("GET", tc.url, nil))
-		out := rec.Body.String()
-		if rec.Code != http.StatusOK {
-			t.Errorf("%s: status %d: %s", tc.name, rec.Code, out)
-			continue
-		}
-		for _, w := range tc.want {
-			if !strings.Contains(out, w) {
-				t.Errorf("%s: output missing %q\n---\n%s", tc.name, w, out)
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest("GET", tc.url, nil))
+			out := rec.Body.String()
+			require.Equal(t, http.StatusOK, rec.Code, out)
+			for _, w := range tc.want {
+				assert.Contains(t, out, w)
 			}
-		}
-		for _, w := range tc.notWant {
-			if strings.Contains(out, w) {
-				t.Errorf("%s: output unexpectedly contains %q\n---\n%s", tc.name, w, out)
+			for _, w := range tc.notWant {
+				assert.NotContains(t, out, w)
 			}
-		}
-		if strings.Contains(out, "no value") {
-			t.Errorf("%s: output contains a missing template value", tc.name)
-		}
-		if !strings.Contains(out, "<!doctype html>") || !strings.Contains(out, "<header>") {
-			t.Errorf("%s: missing global chrome (doctype/header)", tc.name)
-		}
+			assert.NotContains(t, out, "no value", "missing template value")
+			assert.Contains(t, out, "<!doctype html>", "missing global chrome")
+			assert.Contains(t, out, "<header>", "missing global chrome")
+		})
 	}
 }
 
@@ -148,8 +142,7 @@ func TestWebAPI(t *testing.T) {
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", tc.url, nil))
-		if rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {
-			t.Errorf("%s: got %d %q, want %d containing %q", tc.url, rec.Code, rec.Body.String(), tc.status, tc.want)
-		}
+		assert.Equal(t, tc.status, rec.Code, tc.url)
+		assert.Contains(t, rec.Body.String(), tc.want, tc.url)
 	}
 }

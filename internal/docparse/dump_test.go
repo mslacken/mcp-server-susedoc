@@ -2,8 +2,10 @@ package docparse
 
 import (
 	"bytes"
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDumpLoad(t *testing.T) {
@@ -22,29 +24,18 @@ func TestDumpLoad(t *testing.T) {
 	c.Finish()
 
 	var buf bytes.Buffer
-	if err := c.DumpDocument(&buf, &c.Documents[0]); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, c.DumpDocument(&buf, &c.Documents[0]))
 	got := NewCorpus()
-	if err := got.Load(&buf); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, got.Load(&buf))
 	got.Finish()
 
 	ch := &got.Documents[0].Chapters[0]
-	if text := got.Text(ch); text != "# Intro\nInstall foo." {
-		t.Errorf("text = %q", text)
+	assert.Equal(t, "# Intro\nInstall foo.", got.Text(ch))
+	assert.Equal(t, "Install foo.", ch.Prose)
+	assert.Equal(t, []string{"zypper in foo"}, ch.Commands)
+	assert.Equal(t, c.Documents[0].Distro, got.Documents[0].Distro)
+	if e := got.DefineTerm("foo", nil); assert.Len(t, e, 1) {
+		assert.Equal(t, "A package.", e[0].WhatIs)
 	}
-	if ch.Prose != "Install foo." || !reflect.DeepEqual(ch.Commands, []string{"zypper in foo"}) {
-		t.Errorf("chapter = %+v", ch)
-	}
-	if !reflect.DeepEqual(got.Documents[0].Distro, c.Documents[0].Distro) {
-		t.Errorf("distro = %+v", got.Documents[0].Distro)
-	}
-	if e := got.DefineTerm("foo", nil); len(e) != 1 || e[0].WhatIs != "A package." {
-		t.Errorf("glossary = %+v", e)
-	}
-	if e := got.DefineTerm("bar", nil); len(e) != 0 {
-		t.Errorf("unmentioned glossary term dumped: %+v", e)
-	}
+	assert.Empty(t, got.DefineTerm("bar", nil), "unmentioned glossary term dumped")
 }

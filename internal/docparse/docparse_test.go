@@ -1,8 +1,9 @@
 package docparse
 
 import (
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestAliases(t *testing.T) {
@@ -11,9 +12,7 @@ func TestAliases(t *testing.T) {
 		"active/active, active/passive":  {"active/active", "active/passive"},
 		"Pacemaker":                      {"Pacemaker"},
 	} {
-		if got := aliases(term); !reflect.DeepEqual(got, want) {
-			t.Errorf("aliases(%q) = %q, want %q", term, got, want)
-		}
+		assert.Equal(t, want, aliases(term), "aliases(%q)", term)
 	}
 }
 
@@ -37,17 +36,12 @@ func TestGlossaryMatchers(t *testing.T) {
 		for _, re := range glossaryMatchers(tc.term) {
 			got = got || re.MatchString(tc.text)
 		}
-		if got != tc.want {
-			t.Errorf("%q in %q = %v, want %v", tc.term, tc.text, got, tc.want)
-		}
+		assert.Equal(t, tc.want, got, "%q in %q", tc.term, tc.text)
 	}
 }
 
 func TestUniqueID(t *testing.T) {
 	seen := map[string]int{}
 	got := []string{UniqueID(seen, Slug("Overview")), UniqueID(seen, Slug("Overview")), UniqueID(seen, Slug("1.2 What's new?"))}
-	want := []string{"overview", "overview-2", "1-2-what-s-new"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %q, want %q", got, want)
-	}
+	assert.Equal(t, []string{"overview", "overview-2", "1-2-what-s-new"}, got)
 }
