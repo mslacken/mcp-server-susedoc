@@ -3,6 +3,7 @@ package markdown
 import (
 	"regexp"
 	"strings"
+	"unicode"
 
 	"mcp-server-susedoc/internal/docparse"
 
@@ -55,6 +56,8 @@ func parseNodes(lines []string) []node {
 	return transform(build(p.Parse([]byte(strings.Join(lines, "\n"))))).Children
 }
 
+var reAdmonitionFence = regexp.MustCompile(`(?m)^\s*:::.*$\n?`)
+
 // leadText returns the paragraphs between the chapter heading and the first
 // sub heading.
 func leadText(children []node) string {
@@ -67,7 +70,8 @@ func leadText(children []node) string {
 			break
 		}
 		if c.Type == "Paragraph" {
-			if t := strings.TrimSpace(textOf(c, "text")); t != "" {
+			t := strings.TrimSpace(reAdmonitionFence.ReplaceAllString(textOf(c, "text"), ""))
+			if t != "" {
 				parts = append(parts, t)
 			}
 		}
@@ -145,7 +149,7 @@ func commandsIn(children []node) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, b := range blocks {
-		for _, cmd := range commandsInBlock(b.text, b.lang) {
+		for _, cmd := range commandsInCode(b.text, b.lang) {
 			if !seen[cmd] {
 				seen[cmd] = true
 				out = append(out, cmd)
@@ -153,6 +157,74 @@ func commandsIn(children []node) []string {
 		}
 	}
 	return out
+}
+
+var shellLangs = map[string]bool{"bash": true, "sh": true, "shell": true, "zsh": true, "ksh": true}
+
+var (
+	reHereDoc        = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+	reCodeAnnotation = regexp.MustCompile(`\s+#\s*\(\d+\)!?\s*$`)
+	reFuncDef        = regexp.MustCompile(`^[\w.-]+\s*\(\)\s*\{?$`)
+)
+
+func commandsInCode(text, lang string) []string {
+	if !shellLangs[strings.ToLower(lang)] || hasUserPrompt(text) {
+		return commandsInBlock(text, lang)
+	}
+	lines := strings.Split(text, "\n")
+	var out []string
+	for i := 0; i < len(lines); i++ {
+		cmd := strings.TrimSpace(uncallout(lines[i]))
+		if cmd == "" || strings.HasPrefix(cmd, "#") {
+			continue
+		}
+		for strings.HasSuffix(cmd, "\\") && i+1 < len(lines) {
+			i++
+			cmd = strings.TrimSpace(strings.TrimSuffix(cmd, "\\")) + " " + strings.TrimSpace(uncallout(lines[i]))
+		}
+		if m := reHereDoc.FindStringSubmatch(cmd); m != nil {
+			for i+1 < len(lines) && strings.TrimSpace(lines[i+1]) != m[1] {
+				i++
+			}
+			i++
+		}
+		cmd = strings.Join(strings.Fields(reCodeAnnotation.ReplaceAllString(cmd, "")), " ")
+		if significant(cmd) && scriptCommand(cmd) {
+			out = append(out, cmd)
+		}
+	}
+	return out
+}
+
+var shellKeywords = map[string]bool{
+	"if": true, "then": true, "elif": true, "else": true, "fi": true, "for": true, "while": true,
+	"until": true, "do": true, "done": true, "case": true, "esac": true, "function": true,
+	"select": true, "{": true, "}": true, "return": true, "local": true,
+}
+
+func scriptCommand(cmd string) bool {
+	first := strings.Fields(cmd)[0]
+	switch {
+	case shellKeywords[first], strings.HasSuffix(cmd, ";;"), strings.HasSuffix(first, ")") && !strings.Contains(first, "("):
+		return false
+	case reFuncDef.MatchString(cmd):
+		return false
+	case strings.HasPrefix(first, "-"):
+		return false
+	case unicode.IsUpper([]rune(first)[0]) && !strings.ContainsAny(first, "=/$"):
+		return false
+	}
+	return true
+}
+
+func hasUserPrompt(text string) bool {
+	for _, ln := range strings.Split(text, "\n") {
+		ln = uncallout(ln)
+		if reUserPrompt.MatchString(ln) || reCrmShell.MatchString(ln) {
+			return true
+		}
+	}
+	return false
 }
 
 // CommandsInText returns the shell commands of the lines of text that start
