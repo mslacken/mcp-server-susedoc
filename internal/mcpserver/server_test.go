@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -14,6 +12,8 @@ import (
 	"mcp-server-susedoc/internal/docparse/markdown"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const sample = `# Combined Documentation
@@ -25,7 +25,7 @@ const sample = `# Combined Documentation
 ---
 title: Guide
 description: A sample guide
-product: Sample Product
+distro: Sample Product
 version: "1.0"
 ---
 
@@ -64,46 +64,31 @@ The coordinator.
 
 func TestReadDocument(t *testing.T) {
 	c := markdown.BuildDocuments(markdown.SplitSources([]byte(sample), "combined.md"))
-	if len(c.Documents) != 1 || len(c.Glossary) != 3 {
-		t.Fatalf("got %d documents and %d glossary entries", len(c.Documents), len(c.Glossary))
-	}
+	require.Len(t, c.Documents, 1)
+	require.Len(t, c.Glossary, 3)
 
 	tocOnly, err := BuildReadDocument(c, "guide", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids := []string{tocOnly.TOC[0].ID, tocOnly.TOC[1].ID}; !reflect.DeepEqual(ids, []string{"setup", "setup-2"}) {
-		t.Errorf("toc ids = %q", ids)
-	}
-	if tocOnly.Chapter != nil {
-		t.Errorf("expected no chapter in table-of-contents result, got %+v", tocOnly.Chapter)
-	}
+	require.NoError(t, err)
+	require.Len(t, tocOnly.TOC, 2)
+	assert.Equal(t, "setup", tocOnly.TOC[0].ID)
+	assert.Equal(t, "setup-2", tocOnly.TOC[1].ID)
+	assert.Nil(t, tocOnly.Chapter, "chapter in table-of-contents result")
 
 	out, err := BuildReadDocument(c, "guide", "setup")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(out.TOC) != 0 {
-		t.Errorf("expected no table of contents with a chapter, got %d entries", len(out.TOC))
-	}
+	require.NoError(t, err)
+	assert.Empty(t, out.TOC, "table of contents with a chapter")
 	ch := out.Chapter
-	if !strings.HasPrefix(ch.Markdown, "## Setup\n\nThe CIB") || ch.File != "guide/index.md" {
-		t.Errorf("chapter = %+v", ch)
-	}
+	require.NotNil(t, ch)
+	assert.True(t, strings.HasPrefix(ch.Markdown, "## Setup\n\nThe CIB"), "markdown = %q", ch.Markdown)
+	assert.Equal(t, "guide/index.md", ch.File)
 	var terms []string
 	for _, g := range ch.Glossary {
 		terms = append(terms, g.Term)
 	}
-	sort.Strings(terms)
-	if want := []string{"CIB (cluster information base)", "node"}; !reflect.DeepEqual(terms, want) {
-		t.Errorf("glossary terms = %q, want %q", terms, want)
-	}
-	if !reflect.DeepEqual(ch.Commands, []string{"crm configure show"}) {
-		t.Errorf("commands = %q", ch.Commands)
-	}
-	if _, err := BuildReadDocument(c, "guide", "nope"); err == nil {
-		t.Error("expected error for unknown chapter")
-	}
+	assert.ElementsMatch(t, []string{"CIB (cluster information base)", "node"}, terms)
+	assert.Equal(t, []string{"crm configure show"}, ch.Commands)
+	_, err = BuildReadDocument(c, "guide", "nope")
+	assert.Error(t, err, "unknown chapter")
 }
 
 // docbookFiles is a minimal DocBook assembly tree with all the structured
@@ -156,21 +141,13 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 	root := t.TempDir()
 	for name, content := range docbookFiles {
 		p := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
 	}
 	files, err := loader.Find(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	c, err := loader.Load(files)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	hidden := []string{"source", "profile", "subtitle", "meta", "revisions", "bugtracker", "translation",
 		"topic_type", "render_as", "maintainer", "legacy_sources", "sections", "procedures", "admonitions",
 		"xrefs", "links", "images", "includes"}
@@ -184,24 +161,17 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 		}
 	}
 	dump, err := json.Marshal(map[string]any{"documents": c.Documents, "extras": extras})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	for _, k := range hidden {
-		if !strings.Contains(string(dump), `"`+k+`":`) {
-			t.Errorf("parsed corpus lacks %q", k)
-		}
+		assert.Contains(t, string(dump), `"`+k+`":`, "parsed corpus lacks %q", k)
 	}
 
 	ctx := context.Background()
 	st, ct := mcp.NewInMemoryTransports()
-	if _, err := NewServer(c).Connect(ctx, st, nil); err != nil {
-		t.Fatal(err)
-	}
+	_, err = NewServer(c).Connect(ctx, st, nil)
+	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, ct, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer func() { _ = cs.Close() }()
 	var outputs []string
 	for name, args := range map[string]map[string]any{
@@ -213,29 +183,23 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 		"list_glossary":  {},
 	} {
 		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
-		if err != nil || res.IsError {
-			t.Fatalf("%s: %v %+v", name, err, res)
-		}
+		require.NoError(t, err, name)
+		require.False(t, res.IsError, "%s: %+v", name, res)
 		data, _ := json.Marshal(res)
 		outputs = append(outputs, string(data))
 	}
 	for _, uri := range []string{"docs://index", "docs://glossary", "docs://sles-demo", "docs://sles-demo/task"} {
 		res, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{URI: uri})
-		if err != nil {
-			t.Fatalf("%s: %v", uri, err)
-		}
+		require.NoError(t, err, uri)
 		data, _ := json.Marshal(res)
 		outputs = append(outputs, string(data))
 	}
 	all := strings.Join(outputs, "\n")
 	for _, k := range hidden {
-		if strings.Contains(all, `"`+k+`":`) || strings.Contains(all, `\"`+k+`\":`) {
-			t.Errorf("MCP output exposes %q", k)
-		}
+		assert.NotContains(t, all, `"`+k+`":`, "MCP output exposes %q", k)
+		assert.NotContains(t, all, `\"`+k+`\":`, "MCP output exposes %q", k)
 	}
 	for _, want := range []string{"sudo zypper in demo", "Demo Server", "The configuration.", "## 1 Install {#task}"} {
-		if !strings.Contains(all, want) {
-			t.Errorf("MCP output lacks %q", want)
-		}
+		assert.Contains(t, all, want)
 	}
 }

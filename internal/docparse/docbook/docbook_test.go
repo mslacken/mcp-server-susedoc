@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"mcp-server-susedoc/internal/docparse"
 	"mcp-server-susedoc/internal/docparse/markdown"
@@ -18,12 +20,8 @@ func writeFiles(t *testing.T, files map[string]string) string {
 	root := t.TempDir()
 	for name, content := range files {
 		p := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
 	}
 	return root
 }
@@ -72,16 +70,10 @@ func TestEntityExpansion(t *testing.T) {
 		"x&nbsp;y":                   "x&#x000A0;y",
 		"<para os='a'>&suse;</para>": "<para os='a'>SUSE</para>",
 	} {
-		if got := tab.expand(in); got != want {
-			t.Errorf("expand(%q) = %q, want %q", in, got, want)
-		}
+		assert.Equal(t, want, tab.expand(in), "expand(%q)", in)
 	}
-	if got := tab.expand("&productname;"); !strings.Contains(got, "<phrase os='sles'>Local Server</phrase>") {
-		t.Errorf("productname = %q", got)
-	}
-	if l.table(filepath.Join(root, "articles"), subset) != tab {
-		t.Error("table not cached")
-	}
+	assert.Contains(t, tab.expand("&productname;"), "<phrase os='sles'>Local Server</phrase>")
+	assert.Same(t, tab, l.table(filepath.Join(root, "articles"), subset), "table not cached")
 }
 
 func TestSplitDoctype(t *testing.T) {
@@ -93,20 +85,16 @@ func TestSplitDoctype(t *testing.T) {
 ]>
 <topic/>`
 	body, subset := splitDoctype(doc)
-	if strings.Contains(body, "DOCTYPE") || !strings.Contains(body, "<topic/>") || !strings.Contains(body, "<!-- comment ] > -->") {
-		t.Errorf("body = %q", body)
-	}
-	if !strings.Contains(subset, `<!ENTITY x "va]l>ue">`) {
-		t.Errorf("subset = %q", subset)
-	}
+	assert.NotContains(t, body, "DOCTYPE")
+	assert.Contains(t, body, "<topic/>")
+	assert.Contains(t, body, "<!-- comment ] > -->")
+	assert.Contains(t, subset, `<!ENTITY x "va]l>ue">`)
 }
 
 func TestProfile(t *testing.T) {
 	root, err := decodeXML(`<topic><para os="sles;sles4sap">a</para><para os="sleha">b</para>` +
 		`<para arch="x86-64">c</para><para arch="zseries">d</para><para condition="beta">e</para><para>f</para></topic>`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	for _, tc := range []struct {
 		p    profile
 		want string
@@ -115,13 +103,9 @@ func TestProfile(t *testing.T) {
 		{profile{os: profileValues("sleha"), condition: profileValues("beta;suse-product")}, "bcdef"},
 		{profile{}, "abcdef"},
 	} {
-		if got := tc.p.apply(root).flatText(); strings.ReplaceAll(got, " ", "") != tc.want {
-			t.Errorf("%+v: got %q, want %q", tc.p, got, tc.want)
-		}
+		assert.Equal(t, tc.want, strings.ReplaceAll(tc.p.apply(root).flatText(), " ", ""), "%+v", tc.p)
 	}
-	if !reflect.DeepEqual(profileValues(" X86-64; arm ;;power"), []string{"x86_64", "aarch64", "power"}) {
-		t.Errorf("profileValues = %q", profileValues(" X86-64; arm ;;power"))
-	}
+	assert.Equal(t, []string{"x86_64", "aarch64", "power"}, profileValues(" X86-64; arm ;;power"))
 }
 
 // docbookFixture is a small doc-modular like tree: two DC files publishing
@@ -287,97 +271,86 @@ func loadCorpus(root string, names ...string) (*docparse.Corpus, error) {
 func chapExtra(t *testing.T, ch *docparse.Chapter) *ChapterExtra {
 	t.Helper()
 	e, ok := ch.Extra.(*ChapterExtra)
-	if !ok {
-		t.Fatalf("chapter %q extra = %T", ch.ID, ch.Extra)
-	}
+	require.True(t, ok, "chapter %q extra = %T", ch.ID, ch.Extra)
 	return e
+}
+
+// searchDocs returns the document ids of the search hits.
+func searchDocs(hits []docparse.SearchHit) []string {
+	var ids []string
+	for _, h := range hits {
+		ids = append(ids, h.DocID)
+	}
+	return ids
+}
+
+// commandDocs returns the document ids of the command hits.
+func commandDocs(hits []docparse.CommandHit) []string {
+	var ids []string
+	for _, h := range hits {
+		ids = append(ids, h.DocID)
+	}
+	return ids
 }
 
 func TestDocBookCorpus(t *testing.T) {
 	c, err := loadCorpus(docbookFixture(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	var ids []string
 	for _, d := range c.Documents {
 		ids = append(ids, d.ID)
 	}
-	if want := []string{"sap-demo", "sles-demo"}; !reflect.DeepEqual(ids, want) {
-		t.Fatalf("documents = %q, want %q", ids, want)
-	}
+	require.Equal(t, []string{"sap-demo", "sles-demo"}, ids)
 
 	sap, sles := c.Document("sap-demo"), c.Document("sles-demo")
-	if sles.Title != "Demo on SUSE Linux Enterprise Server" || sap.Title != "Demo on SUSE Linux Enterprise Server for SAP applications" {
-		t.Errorf("titles = %q, %q", sles.Title, sap.Title)
-	}
-	if sles.Summary != "Lead of the demo." {
-		t.Errorf("summary = %q", sles.Summary)
-	}
-	if want := (docparse.Distro{Name: "SUSE Linux Enterprise Server", Versions: []string{"16.1", "16.0"}}); !reflect.DeepEqual(sles.Distro, want) {
-		t.Errorf("distro = %+v", sles.Distro)
-	}
-	if sles.License != "GFDL-1.2-invariants-only OR GFDL-1.3-invariants-only" {
-		t.Errorf("license = %q", sles.License)
-	}
-	slesExtra, ok := sles.Extras.(*DocExtra)
-	if !ok {
-		t.Fatalf("sles.Extras = %T", sles.Extras)
-	}
-	sapExtra, ok := sap.Extras.(*DocExtra)
-	if !ok {
-		t.Fatalf("sap.Extras = %T", sap.Extras)
-	}
-	if want := (DocSource{DC: "DC-SLES-demo", Assembly: "articles/demo.asm.xml", Structure: "demo-b"}); *slesExtra.Source != want {
-		t.Errorf("source = %+v", *slesExtra.Source)
-	}
-	wantMeta := DocMeta{
+	assert.Equal(t, "Demo on SUSE Linux Enterprise Server", sles.Title)
+	assert.Equal(t, "Demo on SUSE Linux Enterprise Server for SAP applications", sap.Title)
+	assert.Equal(t, "Lead of the demo.", sles.Summary)
+	assert.Equal(t, docparse.Distro{Name: "SUSE Linux Enterprise Server", Versions: []string{"16.1", "16.0"}}, sles.Distro)
+	assert.Equal(t, "GFDL-1.2-invariants-only OR GFDL-1.3-invariants-only", sles.License)
+	require.IsType(t, &DocExtra{}, sles.Extras)
+	require.IsType(t, &DocExtra{}, sap.Extras)
+	slesExtra, sapExtra := sles.Extras.(*DocExtra), sap.Extras.(*DocExtra)
+	assert.Equal(t, DocSource{DC: "DC-SLES-demo", Assembly: "articles/demo.asm.xml", Structure: "demo-b"}, *slesExtra.Source)
+	assert.Equal(t, DocMeta{
 		Maintainer: "tux@example.com", Series: "Products & Solutions", Tasks: []string{"Installation", "Administration"},
 		Architectures: []string{"x86"}, Updated: "2026-02-03", Description: "Meta description",
+	}, *slesExtra.Meta)
+	if assert.NotEmpty(t, sapExtra.Meta.Architectures) {
+		assert.Equal(t, "ppc", sapExtra.Meta.Architectures[0])
 	}
-	if !reflect.DeepEqual(*slesExtra.Meta, wantMeta) || sapExtra.Meta.Architectures[0] != "ppc" {
-		t.Errorf("meta = %+v", *slesExtra.Meta)
-	}
-	if slesExtra.Subtitle != "A subtitle" || slesExtra.Translation != "yes" || slesExtra.Bugtracker.Component != "Docs" ||
-		!reflect.DeepEqual(slesExtra.Revisions, []Revision{{Date: "2026-01-02", Description: "Initial version"}}) {
-		t.Errorf("subtitle %q, translation %q, bugtracker %+v, revisions %+v", slesExtra.Subtitle, slesExtra.Translation, slesExtra.Bugtracker, slesExtra.Revisions)
-	}
+	assert.Equal(t, "A subtitle", slesExtra.Subtitle)
+	assert.Equal(t, "yes", slesExtra.Translation)
+	assert.Equal(t, "Docs", slesExtra.Bugtracker.Component)
+	assert.Equal(t, []Revision{{Date: "2026-01-02", Description: "Initial version"}}, slesExtra.Revisions)
 
 	// legal notice and glossary are not chapters
-	if len(sles.Chapters) != 2 {
-		t.Fatalf("chapters = %+v", sles.Chapters)
-	}
+	require.Len(t, sles.Chapters, 2)
 	ch := sles.Chapters[0]
 	chEx := chapExtra(t, &ch)
-	if ch.ID != "install" || chEx.Number != "1" || ch.Title != "Install it" || ch.File != "tasks/install.xml" || chEx.TopicType != "task" ||
-		chEx.Maintainer != "geeko@example.com" || ch.Summary != "How to install the demo." {
-		t.Errorf("chapter = %+v", ch)
-	}
-	if want := []string{"sudo zypper in PKG", "sudo reboot now", "rpm -q demo"}; !reflect.DeepEqual(ch.Commands, want) {
-		t.Errorf("commands = %q, want %q", ch.Commands, want)
-	}
-	if !reflect.DeepEqual(chEx.Includes, []string{"snippets/reboot-step.xml"}) ||
-		!reflect.DeepEqual(chEx.LegacySources, []string{"https://github.com/SUSE/doc-sle/blob/main/xml/install.xml"}) {
-		t.Errorf("includes %q, legacy %q", chEx.Includes, chEx.LegacySources)
-	}
-	if want := []string{"about-sec", "dangling"}; !reflect.DeepEqual(ch.Xrefs, want) {
-		t.Errorf("xrefs = %+v", ch.Xrefs)
-	}
+	assert.Equal(t, "install", ch.ID)
+	assert.Equal(t, "1", chEx.Number)
+	assert.Equal(t, "Install it", ch.Title)
+	assert.Equal(t, "tasks/install.xml", ch.File)
+	assert.Equal(t, "task", chEx.TopicType)
+	assert.Equal(t, "geeko@example.com", chEx.Maintainer)
+	assert.Equal(t, "How to install the demo.", ch.Summary)
+	assert.Equal(t, []string{"sudo zypper in PKG", "sudo reboot now", "rpm -q demo"}, ch.Commands)
+	assert.Equal(t, []string{"snippets/reboot-step.xml"}, chEx.Includes)
+	assert.Equal(t, []string{"https://github.com/SUSE/doc-sle/blob/main/xml/install.xml"}, chEx.LegacySources)
+	assert.Equal(t, []string{"about-sec", "dangling"}, ch.Xrefs)
 	// Cross references resolve to their navigable target: "about-sec" is a
 	// section of the "more" chapter in both documents (the own document is
 	// preferred), "dangling" resolves nowhere and is reported as a dead link.
-	if want := []docparse.XrefTarget{
+	assert.Equal(t, []docparse.XrefTarget{
 		{Linkend: "about-sec", Text: "Details", Resolved: true, DocID: "sles-demo", ChapterID: "more", SectionID: "about-sec", Title: "Details", Scope: "section"},
 		{Linkend: "dangling", Resolved: false},
-	}; !reflect.DeepEqual(c.XrefTargets("sles-demo", &ch), want) {
-		t.Errorf("xref targets = %+v", c.XrefTargets("sles-demo", &ch))
-	}
-	if !reflect.DeepEqual(chEx.Links, []Link{{URL: "https://example.com/docs", Text: "the docs"}}) ||
-		!reflect.DeepEqual(chEx.Images, []Image{{File: "images/overview.png", Alt: "Overview"}}) ||
-		!reflect.DeepEqual(chEx.Procedures, []Procedure{{ID: "proc-install", Number: "1", Title: "Installing the package", Steps: 2}}) ||
-		!reflect.DeepEqual(chEx.Admonitions, []Admonition{{Type: "note", Title: "Be careful"}}) ||
-		!reflect.DeepEqual(ch.Sections, []docparse.Section{{ID: "install-verify", Number: "1.1", Title: "Verifying", Level: 1}}) {
-		t.Errorf("structure = %+v %+v %+v %+v %+v", chEx.Links, chEx.Images, chEx.Procedures, chEx.Admonitions, ch.Sections)
-	}
+	}, c.XrefTargets("sles-demo", &ch))
+	assert.Equal(t, []Link{{URL: "https://example.com/docs", Text: "the docs"}}, chEx.Links)
+	assert.Equal(t, []Image{{File: "images/overview.png", Alt: "Overview"}}, chEx.Images)
+	assert.Equal(t, []Procedure{{ID: "proc-install", Number: "1", Title: "Installing the package", Steps: 2}}, chEx.Procedures)
+	assert.Equal(t, []Admonition{{Type: "note", Title: "Be careful"}}, chEx.Admonitions)
+	assert.Equal(t, []docparse.Section{{ID: "install-verify", Number: "1.1", Title: "Verifying", Level: 1}}, ch.Sections)
 
 	md := c.Text(&ch)
 	for _, want := range []string{
@@ -389,107 +362,72 @@ func TestDocBookCorpus(t *testing.T) {
 		"**Table 1: Options**\n\n| Name | Meaning |\n| --- | --- |\n| `a\\|b` | One<br>Two |\n",
 		"### 1.1 Verifying {#install-verify}\n\n```bash\n# rpm -q demo\n```",
 	} {
-		if !strings.Contains(md, want) {
-			t.Errorf("markdown lacks %q:\n%s", want, md)
-		}
+		assert.Contains(t, md, want)
 	}
-	if strings.Contains(md, "Only on SAP") || strings.Contains(md, "editorial") {
-		t.Errorf("profiled or editorial text in markdown:\n%s", md)
-	}
-	if !strings.Contains(c.Text(&sap.Chapters[0]), "Only on SAP.") {
-		t.Error("SAP variant lacks its profiled paragraph")
-	}
+	// profiled or editorial text
+	assert.NotContains(t, md, "Only on SAP")
+	assert.NotContains(t, md, "editorial")
+	assert.Contains(t, c.Text(&sap.Chapters[0]), "Only on SAP.", "SAP variant lacks its profiled paragraph")
 
 	more := sles.Chapters[1]
 	moreEx := chapExtra(t, &more)
-	if more.ID != "more" || moreEx.Number != "2" || moreEx.TopicType != "container" || more.Summary != "Container abstract." ||
-		!reflect.DeepEqual(more.Sections, []docparse.Section{{ID: "about", Number: "2.1", Title: "About the demo", Level: 1, File: "concepts/about.xml"}, {ID: "about-sec", Number: "2.1.1", Title: "Details", Level: 2}}) {
-		t.Errorf("container chapter = %+v", more)
-	}
-	if want := "## 2 More {#more}\n\nContainer abstract.\n\n### 2.1 About the demo {#about}\n\nThe CIB of SUSE Linux Enterprise Server.\n\n#### 2.1.1 Details {#about-sec}"; !strings.HasPrefix(c.Text(&more), want) {
-		t.Errorf("container markdown = %q", c.Text(&more))
-	}
-	terms := c.GlossaryForChapter(&more)
-	if len(terms) != 1 || terms[0].Term != "CIB (cluster information base)" {
-		t.Errorf("terms = %+v", terms)
+	assert.Equal(t, "more", more.ID)
+	assert.Equal(t, "2", moreEx.Number)
+	assert.Equal(t, "container", moreEx.TopicType)
+	assert.Equal(t, "Container abstract.", more.Summary)
+	assert.Equal(t, []docparse.Section{{ID: "about", Number: "2.1", Title: "About the demo", Level: 1, File: "concepts/about.xml"}, {ID: "about-sec", Number: "2.1.1", Title: "Details", Level: 2}}, more.Sections)
+	assert.True(t, strings.HasPrefix(c.Text(&more), "## 2 More {#more}\n\nContainer abstract.\n\n### 2.1 About the demo {#about}\n\nThe CIB of SUSE Linux Enterprise Server.\n\n#### 2.1.1 Details {#about-sec}"),
+		"container markdown = %q", c.Text(&more))
+	if terms := c.GlossaryForChapter(&more); assert.Len(t, terms, 1) {
+		assert.Equal(t, "CIB (cluster information base)", terms[0].Term)
 	}
 
 	// shared glossary, deduplicated across the two documents
-	got := c.GlossaryEntries()
-	if len(got) != 2 ||
-		got[0].Term != "CIB (cluster information base)" || got[0].WhatIs != "The cluster configuration, see node." ||
-		got[1].Term != "node" || got[1].WhatIs != "A member." {
-		t.Errorf("glossary = %+v", got)
+	if got := c.GlossaryEntries(); assert.Len(t, got, 2) {
+		assert.Equal(t, "CIB (cluster information base)", got[0].Term)
+		assert.Equal(t, "The cluster configuration, see node.", got[0].WhatIs)
+		assert.Equal(t, "node", got[1].Term)
+		assert.Equal(t, "A member.", got[1].WhatIs)
 	}
-	if hits := c.FindCommand("zypper", nil); len(hits) != 2 {
-		t.Errorf("find zypper = %+v", hits)
-	}
-	if hits := c.FindCommand("zypper", []string{"sles-demo"}); len(hits) != 1 || hits[0].DocID != "sles-demo" {
-		t.Errorf("find zypper (sles-demo) = %+v", hits)
-	}
-	if hits := c.FindCommand("zypper", []string{"sap-demo"}); len(hits) != 1 || hits[0].DocID != "sap-demo" {
-		t.Errorf("find zypper (sap-demo) = %+v", hits)
-	}
-	if hits := c.FindCommand("zypper", []string{"no-such-doc"}); len(hits) != 0 {
-		t.Errorf("find zypper (no-such-doc) = %+v", hits)
-	}
-	if hits := c.Search("reboot", "for SAP", "", "", 0, 1, false, nil); len(hits) != 1 || hits[0].DocID != "sap-demo" {
-		t.Errorf("search = %+v", hits)
-	}
-	if hits := c.Search("rebo.", "for SAP", "", "", 0, 0, true, nil); len(hits) != 1 || hits[0].DocID != "sap-demo" {
-		t.Errorf("regex search = %+v", hits)
-	}
-	if hits := c.Search("zypper", "", "", "", 0, 0, false, []string{"sles-demo"}); len(hits) != 1 || hits[0].DocID != "sles-demo" {
-		t.Errorf("search (sles-demo) = %+v", hits)
-	}
-	if hits := c.Search("zypper", "", "", "", 0, 0, false, []string{"no-such-doc"}); len(hits) != 0 {
-		t.Errorf("search (no-such-doc) = %+v", hits)
-	}
+	assert.Len(t, c.FindCommand("zypper", nil), 2)
+	assert.Equal(t, []string{"sles-demo"}, commandDocs(c.FindCommand("zypper", []string{"sles-demo"})))
+	assert.Equal(t, []string{"sap-demo"}, commandDocs(c.FindCommand("zypper", []string{"sap-demo"})))
+	assert.Empty(t, c.FindCommand("zypper", []string{"no-such-doc"}))
+	assert.Equal(t, []string{"sap-demo"}, searchDocs(c.Search("reboot", "for SAP", "", "", 0, 1, false, nil)), "search")
+	assert.Equal(t, []string{"sap-demo"}, searchDocs(c.Search("rebo.", "for SAP", "", "", 0, 0, true, nil)), "regex search")
+	assert.Equal(t, []string{"sles-demo"}, searchDocs(c.Search("zypper", "", "", "", 0, 0, false, []string{"sles-demo"})), "search (sles-demo)")
+	assert.Empty(t, c.Search("zypper", "", "", "", 0, 0, false, []string{"no-such-doc"}), "search (no-such-doc)")
 	// scope: "reboot" and "zypper" are body-only, "install" is title-only,
 	// "container" appears only in a summary
-	if hits := c.Search("reboot", "for SAP", "", "title", 0, 1, false, nil); len(hits) != 0 {
-		t.Errorf("title search for body word = %+v", hits)
+	assert.Empty(t, c.Search("reboot", "for SAP", "", "title", 0, 1, false, nil), "title search for body word")
+	assert.Empty(t, c.Search("zypper", "for SAP", "", "summary", 0, 1, false, nil), "summary search for body word")
+	assert.Empty(t, c.Search("rebo.", "for SAP", "", "body", 0, 0, true, nil), "regex search with an unknown scope")
+	if hits := c.Search("install", "for SAP", "", "title", 0, 0, false, nil); assert.Len(t, hits, 1, "title search") {
+		assert.Equal(t, "sap-demo", hits[0].DocID)
+		assert.Equal(t, "Install it", hits[0].Snippet)
 	}
-	if hits := c.Search("zypper", "for SAP", "", "summary", 0, 1, false, nil); len(hits) != 0 {
-		t.Errorf("summary search for body word = %+v", hits)
-	}
-	if hits := c.Search("rebo.", "for SAP", "", "body", 0, 0, true, nil); len(hits) != 0 {
-		t.Errorf("regex search with an unknown scope = %+v", hits)
-	}
-	if hits := c.Search("install", "for SAP", "", "title", 0, 0, false, nil); len(hits) != 1 || hits[0].DocID != "sap-demo" || hits[0].Snippet != "Install it" {
-		t.Errorf("title search = %+v", hits)
-	}
-	if hits := c.Search("reboot", "for SAP", "", "title", 0, 0, true, nil); len(hits) != 0 {
-		t.Errorf("regex title search for body pattern = %+v", hits)
-	}
-	if hits := c.Search("container", "for SAP", "", "summary", 0, 0, false, nil); len(hits) != 1 || hits[0].Snippet != "Container abstract." {
-		t.Errorf("summary search = %+v", hits)
+	assert.Empty(t, c.Search("reboot", "for SAP", "", "title", 0, 0, true, nil), "regex title search for body pattern")
+	if hits := c.Search("container", "for SAP", "", "summary", 0, 0, false, nil); assert.Len(t, hits, 1, "summary search") {
+		assert.Equal(t, "Container abstract.", hits[0].Snippet)
 	}
 }
 
 func TestSingleDCFile(t *testing.T) {
 	root := docbookFixture(t)
 	c, err := loadCorpus(root, "DC-SLES-demo")
-	if err != nil {
-		t.Fatal(err)
+	require.NoError(t, err)
+	if assert.Len(t, c.Documents, 1) {
+		assert.Equal(t, "sles-demo", c.Documents[0].ID)
 	}
-	if len(c.Documents) != 1 || c.Documents[0].ID != "sles-demo" {
-		t.Errorf("documents = %+v", c.Documents)
-	}
-	if _, err := loadCorpus(root, "DC-SLES-gone"); err == nil {
-		t.Error("expected error for a DC file without assembly")
-	}
+	_, err = loadCorpus(root, "DC-SLES-gone")
+	assert.Error(t, err, "expected error for a DC file without assembly")
 }
 
 func TestStructureFallback(t *testing.T) {
 	asm, err := decodeXML(`<assembly><structure xml:id="a"/><structure xml:id="b"/></assembly>`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	for id, want := range map[string]string{"": "a", "b": "b", "nope": "a"} {
-		if got := selectStructure(asm, id).attr["id"]; got != want {
-			t.Errorf("selectStructure(%q) = %q, want %q", id, got, want)
-		}
+		assert.Equal(t, want, selectStructure(asm, id).attr["id"], "selectStructure(%q)", id)
 	}
 }
 
@@ -525,53 +463,35 @@ func TestBookNumbering(t *testing.T) {
 `,
 	})
 	c, err := loadCorpus(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	doc := c.Documents[0]
 	var got []string
 	for i := range doc.Chapters {
 		ch := &doc.Chapters[i]
 		got = append(got, chapExtra(t, ch).Number+" "+ch.Title)
 	}
-	if want := []string{" About", "1 First", "2 Second", "A Extra", "1 Again first"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("chapters = %q, want %q", got, want)
-	}
+	require.Equal(t, []string{" About", "1 First", "2 Second", "A Extra", "1 Again first"}, got)
 	pre, first, app := doc.Chapters[0], doc.Chapters[1], doc.Chapters[3]
 	preEx, firstEx := chapExtra(t, &pre), chapExtra(t, &first)
-	if pre.Sections[0].Number != "1" || preEx.RenderAs != "preface" {
-		t.Errorf("preface = %+v", pre)
-	}
-	if want := []docparse.Section{{ID: "c1-s1", Number: "1.1", Title: "One", Level: 1}, {ID: "c1-s1-1", Number: "1.1.1", Title: "Deep", Level: 2}, {ID: "c1-s2", Number: "1.2", Title: "Two", Level: 1}}; !reflect.DeepEqual(first.Sections, want) {
-		t.Errorf("sections = %+v", first.Sections)
-	}
-	if firstEx.Procedures[0].Number != "1.1" || firstEx.Procedures[1].Number != "" {
-		t.Errorf("procedures = %+v", firstEx.Procedures)
-	}
-	if app.Sections[0].Number != "A.1" {
-		t.Errorf("appendix sections = %+v", app.Sections)
-	}
+	assert.Equal(t, "1", pre.Sections[0].Number)
+	assert.Equal(t, "preface", preEx.RenderAs)
+	assert.Equal(t, []docparse.Section{{ID: "c1-s1", Number: "1.1", Title: "One", Level: 1}, {ID: "c1-s1-1", Number: "1.1.1", Title: "Deep", Level: 2}, {ID: "c1-s2", Number: "1.2", Title: "Two", Level: 1}}, first.Sections)
+	assert.Equal(t, "1.1", firstEx.Procedures[0].Number)
+	assert.Empty(t, firstEx.Procedures[1].Number)
+	assert.Equal(t, "A.1", app.Sections[0].Number)
 	md := c.Text(&first)
 	for _, want := range []string{"## 1 First {#c1}", "**Procedure 1.1: Doing**", "### 1.1 One {#c1-s1}", "**Figure 1.1: Pic**", "#### 1.1.1 Deep {#c1-s1-1}"} {
-		if !strings.Contains(md, want) {
-			t.Errorf("markdown lacks %q:\n%s", want, md)
-		}
+		assert.Contains(t, md, want)
 	}
-	if !strings.Contains(c.Text(&doc.Chapters[2]), "**Table 2.1: T**") {
-		t.Errorf("second chapter = %s", c.Text(&doc.Chapters[2]))
-	}
-	if doc.License == "" {
-		t.Error("legal appendix not taken as license")
-	}
+	assert.Contains(t, c.Text(&doc.Chapters[2]), "**Table 2.1: T**")
+	assert.NotEmpty(t, doc.License, "legal appendix not taken as license")
 }
 
 // render renders the DocBook fragment src as the blocks of a chapter.
 func render(t *testing.T, src string) string {
 	t.Helper()
 	n, err := decodeXML(src)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	r := newRenderer("")
 	r.ch = &docparse.Chapter{}
 	r.extra = &ChapterExtra{}
@@ -586,12 +506,9 @@ PIDFile=FILE<xref linkend="co-a"/></screen>
 <calloutlist><callout arearefs="co-a"><para>Evaluates.</para></callout><callout arearefs="co-b co-c"><para>Both.</para></callout></calloutlist>
 <para>See <xref linkend="co-b"/>.</para></x>`)
 	want := "```\n> oscap eval <1> \\\n  --profile p <2>\nType=forking <3>\nPIDFile=FILE <1>\n```\n\n- <1> Evaluates.\n\n- <2> <3> Both.\n\nSee <2>."
-	if md != want {
-		t.Errorf("got\n%s\nwant\n%s", md, want)
-	}
-	if cmds := markdown.CommandsInText("> oscap eval <1> \\\n  --profile p <2>\n> virsh vol-create-as POOL <1>NAME <2> 12G"); !reflect.DeepEqual(cmds, []string{"oscap eval --profile p", "virsh vol-create-as POOL NAME 12G"}) {
-		t.Errorf("commands = %q", cmds)
-	}
+	assert.Equal(t, want, md)
+	assert.Equal(t, []string{"oscap eval --profile p", "virsh vol-create-as POOL NAME 12G"},
+		markdown.CommandsInText("> oscap eval <1> \\\n  --profile p <2>\n> virsh vol-create-as POOL <1>NAME <2> 12G"))
 }
 
 func TestTableSpans(t *testing.T) {
@@ -617,7 +534,5 @@ func TestTableSpans(t *testing.T) {
 | r | wide |  |
 | --- | --- | --- |
 | r | x | y |`
-	if md != want {
-		t.Errorf("got\n%s\nwant\n%s", md, want)
-	}
+	assert.Equal(t, want, md)
 }

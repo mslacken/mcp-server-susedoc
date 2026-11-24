@@ -18,6 +18,11 @@ type Document struct {
 	Chapters []Chapter `json:"chapters" yaml:"chapters"`
 	License  string    `json:"license,omitempty" yaml:"license,omitempty"`
 
+	// Glossary holds the glossary entries the document defines. They are
+	// merged into the corpus glossary and written with the document by
+	// DumpDocument, even if no chapter mentions them.
+	Glossary []GlossaryEntry `json:"-" yaml:"-"`
+
 	// Extras carries format specific document data, set by the parser that
 	// produced the document (see the docbook package). It is not part of the
 	// MCP surface and is not serialized by the core types.
