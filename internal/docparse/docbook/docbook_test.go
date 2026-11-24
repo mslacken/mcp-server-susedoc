@@ -360,7 +360,7 @@ func TestDocBookCorpus(t *testing.T) {
 		"- **`--force`**\n\n    Force it.\n",
 		"**Figure 1: Overview**\n\n![Overview](images/overview.png)\n",
 		"**Table 1: Options**\n\n| Name | Meaning |\n| --- | --- |\n| `a\\|b` | One<br>Two |\n",
-		"### 1.1 Verifying {#install-verify}\n\n```bash\n# rpm -q demo\n```",
+		"### 1.1 Verifying {#install-verify}\n\n```console\n# rpm -q demo\n```",
 	} {
 		assert.Contains(t, md, want)
 	}
@@ -535,4 +535,28 @@ func TestTableSpans(t *testing.T) {
 | --- | --- | --- |
 | r | x | y |`
 	assert.Equal(t, want, md)
+}
+
+func TestListIntroBlocks(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{{
+		`<x><variablelist><title>Snapshot types</title><para>Snapper knows three types.</para>` +
+			`<varlistentry><term><literal>pre</literal></term><listitem><para>Before.</para></listitem></varlistentry></variablelist></x>`,
+		"**Snapshot types**\n\nSnapper knows three types.\n\n- **`pre`**\n\n    Before.",
+	}, {
+		`<x><screen>a<co xml:id="c1"/></screen><calloutlist><para>The callouts:</para>` +
+			`<callout arearefs="c1"><para>First.</para></callout></calloutlist></x>`,
+		"```\na <1>\n```\n\nThe callouts:\n\n- <1> First.",
+	}, {
+		`<x><qandaset><para>Common questions.</para><qandaentry><question><para>Why?</para></question>` +
+			`<answer><para>Because.</para></answer></qandaentry></qandaset></x>`,
+		"Common questions.\n\n**Q:** Why?\n\nBecause.",
+	}, {
+		`<x><glossary><title>Terms</title><glossdiv><title>C</title><glossentry><glossterm>CIB</glossterm>` +
+			`<glossdef><para>Cluster information base.</para></glossdef></glossentry></glossdiv></glossary></x>`,
+		"**Terms**\n\n**C**\n\n- **CIB**\n\n    Cluster information base.",
+	}} {
+		if md := render(t, tc.src); md != tc.want {
+			t.Errorf("%s:\ngot\n%s\nwant\n%s", tc.src, md, tc.want)
+		}
+	}
 }
