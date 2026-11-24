@@ -25,13 +25,14 @@ func TestDumpLoad(t *testing.T) {
 
 	var buf bytes.Buffer
 	require.NoError(t, c.DumpDocument(&buf, &c.Documents[0]))
+	assert.NotContains(t, buf.String(), `"prose"`)
 	got := NewCorpus()
 	require.NoError(t, got.Load(&buf))
 	got.Finish()
 
 	ch := &got.Documents[0].Chapters[0]
 	assert.Equal(t, "# Intro\nInstall foo.", got.Text(ch))
-	assert.Equal(t, "Install foo.", ch.Prose)
+	assert.Equal(t, "# Intro\nInstall foo.", ch.Prose, "without ProseOf the markdown is the prose")
 	assert.Equal(t, []string{"zypper in foo"}, ch.Commands)
 	assert.Equal(t, c.Documents[0].Distro, got.Documents[0].Distro)
 	if e := got.DefineTerm("foo", nil); assert.Len(t, e, 1) {

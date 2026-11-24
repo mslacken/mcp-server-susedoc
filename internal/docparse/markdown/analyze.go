@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 
+	"mcp-server-susedoc/internal/docparse"
+
 	"github.com/gomarkdown/markdown/parser"
 )
 
@@ -12,6 +14,10 @@ type Analysis struct {
 	Commands []string // shell commands of the code blocks, without prompt
 	Lead     string   // paragraphs between the chapter heading and the first sub heading
 	Prose    string   // running text without code, for glossary matching
+}
+
+func init() {
+	docparse.ProseOf = func(lines []string) string { return proseOf(parseNodes(lines)) }
 }
 
 // Analyze parses the markdown lines of a chapter, starting with its heading.

@@ -26,9 +26,15 @@ const DumpVersion = 3
 
 // The dump format holds the MCP surface of every document and chapter (id,
 // title, summary, distro, product, file, commands, sections, xrefs, license), plus
-// each chapter's markdown and prose, so that a corpus read back from it is self
-// sufficient and can be served without the original sources. Format specific
-// extras (like the DocBook provenance) are not part of it.
+// each chapter's markdown, so that a corpus read back from it is self
+// sufficient and can be served without the original sources. The prose of a
+// chapter is not part of it, it is recreated from the markdown, see ProseOf.
+// Format specific extras (like the DocBook provenance) are not part of it either.
+
+// ProseOf returns the running text of a chapter's markdown lines, without
+// code, for glossary matching. It is set by the markdown package; if it is
+// nil, the whole markdown is taken as prose.
+var ProseOf func(lines []string) string
 
 type dumpChapter struct {
 	ID       string    `json:"id"`
@@ -39,7 +45,6 @@ type dumpChapter struct {
 	Sections []Section `json:"sections,omitempty"`
 	Xrefs    []string  `json:"xrefs,omitempty"`
 	Text     string    `json:"text"`
-	Prose    string    `json:"prose,omitempty"`
 }
 
 type dumpDocument struct {
@@ -113,7 +118,7 @@ func (c *Corpus) DumpDocument(w io.Writer, d *Document) error {
 		out.Document.Chapters = append(out.Document.Chapters, dumpChapter{
 			ID: ch.ID, Title: ch.Title, Summary: ch.Summary, File: ch.File,
 			Commands: ch.Commands, Sections: ch.Sections, Xrefs: ch.Xrefs,
-			Text: c.Text(ch), Prose: ch.Prose,
+			Text: c.Text(ch),
 		})
 		terms = append(terms, c.termsIn(ch.Prose)...)
 	}
@@ -246,10 +251,14 @@ func loadFile(r io.Reader, offset int) (Part, error) {
 		// the document offset is unique within the corpus, unlike the document id
 		key := fmt.Sprintf("dump\x00%d\x00%d", offset, j)
 		p.Lines[key] = lines
+		prose := ch.Text
+		if ProseOf != nil {
+			prose = ProseOf(lines)
+		}
 		doc.Chapters = append(doc.Chapters, Chapter{
 			ID: ch.ID, Title: ch.Title, Summary: ch.Summary, File: ch.File,
 			Commands: ch.Commands, Sections: ch.Sections, Xrefs: ch.Xrefs,
-			LinesKey: key, Start: 1, End: uint(len(lines)), Prose: ch.Prose,
+			LinesKey: key, Start: 1, End: uint(len(lines)), Prose: prose,
 		})
 	}
 	p.Documents = append(p.Documents, doc)
