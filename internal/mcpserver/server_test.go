@@ -79,7 +79,7 @@ func TestReadDocument(t *testing.T) {
 	assert.Empty(t, out.TOC, "table of contents with a chapter")
 	ch := out.Chapter
 	require.NotNil(t, ch)
-	assert.True(t, strings.HasPrefix(ch.Markdown, "## Setup\n\nThe CIB"), "markdown = %q", ch.Markdown)
+	assert.True(t, strings.HasPrefix(ch.Markdown, "## Setup {#setup}\n\nThe CIB"), "markdown = %q", ch.Markdown)
 	assert.Equal(t, "guide/index.md", ch.File)
 	var terms []string
 	for _, g := range ch.Glossary {
@@ -87,6 +87,9 @@ func TestReadDocument(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"CIB (cluster information base)", "node"}, terms)
 	assert.Equal(t, []string{"crm configure show"}, ch.Commands)
+	second, err := BuildReadDocument(c, "guide", "setup-2")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(second.Chapter.Markdown, "## Setup {#setup-2}\n"), "markdown = %q", second.Chapter.Markdown)
 	_, err = BuildReadDocument(c, "guide", "nope")
 	assert.Error(t, err, "unknown chapter")
 }
@@ -188,7 +191,7 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 		data, _ := json.Marshal(res)
 		outputs = append(outputs, string(data))
 	}
-	for _, uri := range []string{"docs://index", "docs://glossary", "docs://sles-demo", "docs://sles-demo/task"} {
+	for _, uri := range []string{"docs://index", "docs://glossary", "docs://sles-demo", "docs://sles-demo/task", "docs://sles-demo/task#sec"} {
 		res, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{URI: uri})
 		require.NoError(t, err, uri)
 		data, _ := json.Marshal(res)
@@ -199,7 +202,8 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 		assert.NotContains(t, all, `"`+k+`":`, "MCP output exposes %q", k)
 		assert.NotContains(t, all, `\"`+k+`\":`, "MCP output exposes %q", k)
 	}
-	for _, want := range []string{"sudo zypper in demo", "Demo Server", "The configuration.", "## 1 Install {#task}"} {
+	for _, want := range []string{"sudo zypper in demo", "Demo Server", "The configuration.", "## 1 Install {#task}",
+		`"uri":"docs://sles-demo/task#sec"`, `## References\n\n- [Section](docs://sles-demo/task#sec)`} {
 		assert.Contains(t, all, want)
 	}
 }

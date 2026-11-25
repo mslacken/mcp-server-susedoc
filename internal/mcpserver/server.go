@@ -128,10 +128,11 @@ func BuildReadDocument(c *docparse.Corpus, docID, chapterID string) (ReadDocumen
 	if ch == nil {
 		return ReadDocumentOut{}, fmt.Errorf("unknown chapter %q in document %q", chapterID, docID)
 	}
+	refs := nonNil(c.XrefTargets(doc.ID, ch))
 	out.Chapter = &chapterOut{
 		ID: ch.ID, Title: ch.Title, File: ch.File,
-		Markdown: c.Text(ch), Commands: nonNil(ch.Commands), Glossary: c.GlossaryForChapter(ch),
-		References: nonNil(c.XrefTargets(doc.ID, ch)),
+		Markdown: docparse.ServedText(c.Text(ch), ch, refs), Commands: nonNil(ch.Commands), Glossary: c.GlossaryForChapter(ch),
+		References: refs,
 	}
 	return out, nil
 }
@@ -311,6 +312,8 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 		Description: "Return a document's metadata and table of contents. If chapter_id is given, return " +
 			"that chapter's markdown, the commands it shows, the definitions of all glossary terms it mentions " +
 			"and where the chapter's cross references point to (unresolved ones are reported as dead), " +
+			"each resolved reference with the docs:// uri of the resource to read its target; " +
+			"links in the markdown point to these uris and headings carry their {#id}, " +
 			"without the table of contents.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in readDocumentIn) (*mcp.CallToolResult, ReadDocumentOut, error) {
 		debugf("read_document doc_id=%q chapter_id=%q", in.DocID, in.ChapterID)
@@ -393,13 +396,16 @@ func addResources(srv *mcp.Server, c *docparse.Corpus) {
 	// docs://{doc_id} and docs://{doc_id}/{chapter_id}, same content as read_document
 	handler := func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		uri := req.Params.URI
-		docID, chapterID, _ := strings.Cut(strings.TrimPrefix(uri, "docs://"), "/")
+		// the #section_id of a reference uri names a section, the whole chapter is returned
+		path, _, _ := strings.Cut(strings.TrimPrefix(uri, "docs://"), "#")
+		docID, chapterID, _ := strings.Cut(path, "/")
 		out, err := BuildReadDocument(c, docID, chapterID)
 		if err != nil {
 			return nil, mcp.ResourceNotFoundError(uri)
 		}
 		if out.Chapter != nil {
-			return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: uri, MIMEType: "text/markdown", Text: out.Chapter.Markdown}}}, nil
+			text := out.Chapter.Markdown + referencesMarkdown(out.Chapter.References)
+			return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: uri, MIMEType: "text/markdown", Text: text}}}, nil
 		}
 		return jsonResult(uri, out)
 	}
@@ -408,7 +414,29 @@ func addResources(srv *mcp.Server, c *docparse.Corpus) {
 		Description: "Metadata and table of contents of a document",
 	}, handler)
 	srv.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "docs://{doc_id}/{chapter_id}", Name: "chapter", MIMEType: "text/markdown",
-		Description: "Markdown of a chapter",
+		URITemplate: "docs://{doc_id}/{chapter_id}{#section_id}", Name: "chapter", MIMEType: "text/markdown",
+		Description: "Markdown of a chapter, followed by a References list with the docs:// URI of every cross reference target",
 	}, handler)
+}
+
+// referencesMarkdown lists the cross references of a chapter as a markdown
+// section of links to their docs:// URIs; unresolved ones are marked as such.
+func referencesMarkdown(refs []docparse.XrefTarget) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## References\n\n")
+	for _, r := range refs {
+		title := r.Title
+		if title == "" {
+			title = r.Linkend
+		}
+		if r.Resolved {
+			fmt.Fprintf(&b, "- [%s](%s)\n", title, r.URI)
+		} else {
+			fmt.Fprintf(&b, "- %s (unresolved)\n", r.Linkend)
+		}
+	}
+	return b.String()
 }

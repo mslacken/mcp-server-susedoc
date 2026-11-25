@@ -159,9 +159,10 @@ func (c *Corpus) Finish() {
 // Targets found in any document are marked Resolved with the document, chapter
 // and section id to navigate to, preferring the chapter's own document when the
 // linkend resolves in more than one (e.g. the same book built for several
-// products). Linkends with no navigable target are kept with Resolved false, so
-// a dead reference is reported instead of silently dropped. Results are in the
-// order the chapter references them.
+// products), and with the docs:// URI to read the target. Linkends with no
+// navigable target are kept with Resolved false, so a dead reference is
+// reported instead of silently dropped. Results are in the order the chapter
+// references them.
 func (c *Corpus) XrefTargets(docID string, ch *Chapter) []XrefTarget {
 	out := make([]XrefTarget, 0, len(ch.Xrefs))
 	seen := map[string]bool{}
@@ -179,6 +180,10 @@ func (c *Corpus) XrefTargets(docID string, ch *Chapter) []XrefTarget {
 			t.SectionID = loc.sectionID
 			t.Title = loc.title
 			t.Scope = loc.scope
+			t.URI = "docs://" + loc.docID + "/" + loc.chapterID
+			if loc.sectionID != "" {
+				t.URI += "#" + loc.sectionID
+			}
 		}
 		out = append(out, t)
 	}
