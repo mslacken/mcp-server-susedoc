@@ -99,10 +99,16 @@ func decodeAs[T any](v any) T {
 	return t
 }
 
+// reDocsLink is a markdown link to a chapter resource:
+// "](docs://doc/chapter#section)".
+var reDocsLink = regexp.MustCompile(`\]\(docs://([^/)\s]+)/([^)\s]+)\)`)
+
 // markdownToHTML renders a chapter's markdown to standalone HTML using the same
-// parser extensions the corpus is built with. The result is inserted as-is into
-// the page (it is already well-formed server-side HTML).
+// parser extensions the corpus is built with. Links to docs:// resources are
+// pointed to the chapter pages of the web interface. The result is inserted
+// as-is into the page (it is already well-formed server-side HTML).
 func markdownToHTML(md string) template.HTML {
+	md = reDocsLink.ReplaceAllString(md, "](/chapter/$1/$2)")
 	return template.HTML(markdown.ToHTML([]byte(md), nil, nil))
 }
 

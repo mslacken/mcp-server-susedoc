@@ -31,7 +31,7 @@ version: "1.0"
 
 ## Setup
 
-The CIB holds the configuration of every node.
+The CIB holds the configuration of every node, see [Split brain](#split-brain).
 
 ` + "```" + `
 # crm configure show
@@ -40,6 +40,10 @@ The CIB holds the configuration of every node.
 ## Quorum
 
 The quorum prevents split brain.
+
+### Split brain
+
+Two halves of the cluster.
 
 ---
 
@@ -78,8 +82,9 @@ func TestWebPagesRender(t *testing.T) {
 		{name: "documents-version", url: "/documents?version=1.0", want: []string{`<option value="">All</option>`, `<option value="1.0" selected>`}},
 		{name: "read-toc", url: "/document/guide", want: []string{"Guide", "Table of contents", "Setup", "Quorum", "/chapter/guide/setup"}},
 		{name: "read-chapter", url: "/chapter/guide/setup",
-			want:    []string{"crm configure show", "CIB", "Commands in this chapter"},
-			notWant: []string{"Table of contents", "/chapter/guide/quorum"}},
+			want:    []string{"crm configure show", "CIB", "Commands in this chapter", `<h2 id="setup">Setup</h2>`, `<a href="/chapter/guide/quorum#split-brain">Split brain</a>`},
+			notWant: []string{"Table of contents", `href="/chapter/guide/quorum"`, "docs://"}},
+		{name: "read-chapter-section", url: "/chapter/guide/quorum", want: []string{`<h3 id="split-brain">Split brain</h3>`}},
 		{name: "read-unknown", url: "/document/nope", want: []string{"unknown document", "Browse the documents"}},
 		{name: "search", url: "/search?query=quorum&limit=10", want: []string{"quorum", "open &rarr;"}},
 		{name: "search-docs", url: "/search?query=cib&docs=guide", want: []string{"Setup", `name="docs" value="guide" checked`}},

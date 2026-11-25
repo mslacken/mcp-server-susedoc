@@ -343,7 +343,7 @@ func TestDocBookCorpus(t *testing.T) {
 	// section of the "more" chapter in both documents (the own document is
 	// preferred), "dangling" resolves nowhere and is reported as a dead link.
 	assert.Equal(t, []docparse.XrefTarget{
-		{Linkend: "about-sec", Text: "Details", Resolved: true, DocID: "sles-demo", ChapterID: "more", SectionID: "about-sec", Title: "Details", Scope: "section"},
+		{Linkend: "about-sec", Text: "Details", Resolved: true, DocID: "sles-demo", ChapterID: "more", SectionID: "about-sec", Title: "Details", Scope: "section", URI: "docs://sles-demo/more#about-sec"},
 		{Linkend: "dangling", Resolved: false},
 	}, c.XrefTargets("sles-demo", &ch))
 	assert.Equal(t, []Link{{URL: "https://example.com/docs", Text: "the docs"}}, chEx.Links)

@@ -50,8 +50,9 @@ The importer reads these keys, all others (like `arch` above) are ignored:
 If `distro` or `version` is missing, an `Applies to DISTRO VERSION` line
 within the first lines after the header is used instead.
 
-The license is not a front matter key, it is taken from the
-[Legal Notice](#legal-notice) chapter.
+The license is not a front matter key, it is taken from the Legal Notice
+chapter. That chapter is not served as a chapter of its own, so it can not
+be the target of a cross reference.
 
 ### JSON header {#json-header-example}
 
@@ -112,6 +113,16 @@ of a chapter, like [Commands](#commands), or of a section, like the
 [JSON header](#json-header-example) or [Sections](#sections). Every
 target is listed once, in order of its first appearance, so a second link
 to [Commands](#commands) adds nothing.
+
+`read_document` lists them as `references`. Each resolved one has the
+`uri` of its target: `docs://reference-doc/commands` for the chapter,
+`docs://reference-doc/front-matter#json-header-example` for a section, with
+the section ID as fragment. The served markdown links to these URIs instead
+of the anchors, and every heading carries the `{#id}` of its chapter or
+section, so the fragment names a heading of the target chapter. Reading the
+resource `docs://{doc_id}/{chapter_id}` returns that markdown followed by a
+`References` list with links to these URIs. The web interface points the
+links to its chapter pages.
 
 Links to other files or web pages, like
 [openSUSE](https://www.opensuse.org/), are no cross references.
