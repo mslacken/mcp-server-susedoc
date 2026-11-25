@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -16,7 +15,6 @@ import (
 	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
 	"mcp-server-susedoc/internal/docparse/loader"
-	"mcp-server-susedoc/internal/docparse/markdown"
 	"mcp-server-susedoc/internal/mcpserver"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -60,9 +58,8 @@ func main() {
 	flag.Var(&importLocations, "import", "read documents in the internal format from PATH instead of -d/-f, may be given more than once; PATH is a document file or a directory searched recursively for *.json files; - reads "+defaultImportDir)
 	exportDir := flag.String("export", "", "write the corpus in the internal format to the directory PATH, one <id>.json file per document, then exit")
 	mcpAddr := flag.String("mcp", "", "by default the binary serves the documents as an MCP server over stdin/stdout; with an address argument (a.g. localhost:8080) it listens on that address and is exposed at /mcp over http(s). Giving -mcp without an argument is the same as the default")
-	web := flag.String("web", "", "serve the documents as a small web interface from the given adress a.g. localhost:8080")
+	webAddr := flag.String("web", "", "serve the documents as a small web interface from the given adress a.g. localhost:8080")
 	tlsDir := flag.String("tls", "", "directory holding the tls certificate and private key .pem files; with -web the server is served over https and with -mcp addr the server is exposed at https://addr/mcp")
-	tree := flag.Bool("tree", false, "dump the raw markdown node tree as json")
 	dump := flag.Bool("dump", false, "print the corpus to stdout instead of serving it as an MCP server")
 	asJSON := flag.Bool("json", false, "with -dump, print documents as json instead of yaml")
 	debugFlag := flag.Bool("debug", false, "log tool calls, web requests and DocBook parsing problems to stderr")
@@ -76,27 +73,6 @@ func main() {
 	}
 	debug.SetEnabled(*debugFlag)
 	files = append(files, flag.Args()...)
-
-	var err error
-	if *tree {
-		var data []byte
-		if len(files) > 0 {
-			data, err = os.ReadFile(files[0])
-		} else {
-			data, err = io.ReadAll(os.Stdin)
-		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error reading input:", err)
-			os.Exit(1)
-		}
-		enc, err := json.MarshalIndent(markdown.BuildTree(data), "", "  ")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error encoding json:", err)
-			os.Exit(1)
-		}
-		fmt.Println(string(enc))
-		os.Exit(0)
-	}
 
 	// without any input use the packaged exports
 	if len(importLocations) == 0 && len(directories) == 0 && len(files) == 0 {
@@ -121,6 +97,10 @@ func main() {
 		}
 		corpus.Finish()
 	} else {
+		// importing raw docs, silence warnings if runng as mcp over StdioTransport
+		if !debug.Enabled() && *webAddr == "" && *mcpAddr == "" {
+			debug.SetSilence(true)
+		}
 		var docs []loader.DocFile
 		for _, dir := range directories {
 			found, err := loader.Find(dir)
@@ -214,8 +194,8 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if *web != "" {
-		addr, err := parseAddress(*web)
+	if *webAddr != "" {
+		addr, err := parseAddress(*webAddr)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "web:", err)
 			os.Exit(1)

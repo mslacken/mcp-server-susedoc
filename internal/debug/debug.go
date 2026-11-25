@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	enabled atomic.Bool
-	mu      sync.Mutex
-	out     io.Writer = os.Stderr
+	enabled         atomic.Bool
+	silenceWarnings atomic.Bool
+	mu              sync.Mutex
+	out             io.Writer = os.Stderr
 )
 
 // SetEnabled switches diagnostic output on or off.
@@ -32,6 +33,11 @@ func SetOutput(w io.Writer) {
 	mu.Lock()
 	defer mu.Unlock()
 	out = w
+}
+
+// SetSilence disables output for the warnings
+func SetSilence(silence bool) {
+	silenceWarnings.Store(silence)
 }
 
 // Printf writes one line tagged with component if output is enabled.
@@ -61,9 +67,11 @@ var warnings atomic.Int64
 // not, for content that is dropped while reading the documents.
 func Warnf(component, format string, args ...any) {
 	warnings.Add(1)
-	mu.Lock()
-	defer mu.Unlock()
-	_, _ = fmt.Fprintf(out, "[warn] "+component+": "+format+"\n", args...)
+	if !silenceWarnings.Load() {
+		mu.Lock()
+		defer mu.Unlock()
+		_, _ = fmt.Fprintf(out, "[warn] "+component+": "+format+"\n", args...)
+	}
 }
 
 // Warn writes err as a warning, as Warnf does, one line for each of the
