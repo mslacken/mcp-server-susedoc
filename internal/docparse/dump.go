@@ -1,6 +1,7 @@
 package docparse
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,29 +135,33 @@ func (c *Corpus) DumpDocument(w io.Writer, d *Document) error {
 	return enc.Encode(out)
 }
 
-// Import reads the dump files at path into the corpus and returns their names:
-// path itself if it is a file, and otherwise every *.json file in path and,
+// Import reads the dump files at path into the corpus: path itself if it is a
+// file, and otherwise every *.json file in path and,
 // recursively, in its subdirectories, following symbolic links. The files are
 // read in parallel, into their own parts, and added in file order, so the
 // document order and the first definition winning for a glossary term stay
 // deterministic. Files that cannot be read are skipped: the corpus holds what
 // was read and the error, if any, joins the reasons the others were skipped.
-// Finish must be called once the corpus is complete.
-func (c *Corpus) Import(path string) ([]string, error) {
+// If ctx is cancelled the remaining files are not read and ctx.Err() is
+// returned. Finish must be called once the corpus is complete.
+func (c *Corpus) Import(ctx context.Context, path string) error {
 	files, err := dumpFiles(path, map[string]bool{})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no dump files in %s", path)
+		return fmt.Errorf("no dump files in %s", path)
 	}
 	parts := make([]Part, len(files))
 	errs := make([]error, len(files))
-	var g errgroup.Group
+	g, gctx := errgroup.WithContext(ctx)
 	// bound the number of files open at once
 	g.SetLimit(runtime.GOMAXPROCS(0))
 	for i, name := range files {
 		g.Go(func() error {
+			if err := gctx.Err(); err != nil {
+				return err
+			}
 			f, err := os.Open(name)
 			if err != nil {
 				errs[i] = fmt.Errorf("%s: %w", name, err)
@@ -167,15 +172,18 @@ func (c *Corpus) Import(path string) ([]string, error) {
 			if err != nil {
 				errs[i] = fmt.Errorf("%s: %w", name, err)
 			}
+			debug.Printf("import", "imported %s", name)
 			return nil
 		})
 	}
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return err
+	}
 	// a file that cannot be read leaves an empty part
 	for _, p := range parts {
 		c.Add(p)
 	}
-	return files, errors.Join(errs...)
+	return errors.Join(errs...)
 }
 
 // dumpFiles returns the dump files at path, see Import, in lexical order.

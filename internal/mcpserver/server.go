@@ -251,10 +251,11 @@ func setEnum(s *jsonschema.Schema, prop string, values []string) {
 }
 
 // CreateListDocumentsSchema returns the input schema for list_documents with
-// product and version restricted to the values present in the corpus.
+// product and version restricted to the values present in the corpus, or
+// unrestricted if c is nil.
 func CreateListDocumentsSchema(c *docparse.Corpus) *jsonschema.Schema {
 	schema, _ := jsonschema.For[listDocumentsIn](nil)
-	if schema != nil {
+	if schema != nil && c != nil {
 		ov := CorpusSummary(c)
 		setEnum(schema, "product", ov.Products)
 		setEnum(schema, "version", ov.Versions)
@@ -264,13 +265,15 @@ func CreateListDocumentsSchema(c *docparse.Corpus) *jsonschema.Schema {
 
 // CreateSearchDocsSchema returns the input schema for search_docs with product
 // and version restricted to the values present in the corpus and scope to the
-// supported values.
+// supported values. Product and version are unrestricted if c is nil.
 func CreateSearchDocsSchema(c *docparse.Corpus) *jsonschema.Schema {
 	schema, _ := jsonschema.For[searchDocsIn](nil)
 	if schema != nil {
-		ov := CorpusSummary(c)
-		setEnum(schema, "product", ov.Products)
-		setEnum(schema, "version", ov.Versions)
+		if c != nil {
+			ov := CorpusSummary(c)
+			setEnum(schema, "product", ov.Products)
+			setEnum(schema, "version", ov.Versions)
+		}
 		setEnum(schema, "scope", []string{"all", "title", "summary"})
 	}
 	return schema
@@ -292,18 +295,49 @@ func init() {
 
 // NewServer builds the MCP server exposing the corpus' documents.
 func NewServer(c *docparse.Corpus) *mcp.Server {
+	return NewLoadingServer(Ready(c))
+}
+
+// NewLoadingServer builds the MCP server exposing the documents of a corpus
+// that may still be loading. Its tools are listed right away, without the
+// product and version enums, and are replaced with ones restricted to the
+// values in the corpus once it is loaded, which notifies the clients with
+// notifications/tools/list_changed. Tool calls and resource reads wait for
+// the corpus.
+func NewLoadingServer(p *PendingCorpus) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "mcp-server-susedoc", Version: Version}, &mcp.ServerOptions{
 		Instructions: "Product documentation. Use search_docs or list_documents to find a document, " +
 			"read_document to get its table of contents or a chapter, find_command to find where a " +
 			"command is documented and define_term for the glossary.",
 	})
+	addTools(srv, p)
+	addResources(srv, p)
+	if p.loaded() == nil {
+		go func() {
+			if _, err := p.Wait(context.Background(), nil); err == nil {
+				debugf("corpus loaded, updating the tool schemas")
+				addTools(srv, p)
+			}
+		}()
+	}
+	return srv
+}
+
+// addTools adds the tools to srv, replacing those already added. The input
+// schemas list the products and versions of the corpus if it is loaded.
+func addTools(srv *mcp.Server, p *PendingCorpus) {
+	loaded := p.loaded()
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_documents",
 		Description: "List the available documents (guides) with id, title, summary and product versions.",
-		InputSchema: CreateListDocumentsSchema(c),
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in listDocumentsIn) (*mcp.CallToolResult, ListDocumentsOut, error) {
+		InputSchema: CreateListDocumentsSchema(loaded),
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in listDocumentsIn) (*mcp.CallToolResult, ListDocumentsOut, error) {
 		debugf("list_documents product=%q version=%q", in.Product, in.Version)
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, ListDocumentsOut{}, err
+		}
 		return nil, ListDocuments(c, in.Product, in.Version), nil
 	})
 
@@ -315,8 +349,12 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 			"each resolved reference with the docs:// uri of the resource to read its target; " +
 			"links in the markdown point to these uris and headings carry their {#id}, " +
 			"without the table of contents.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in readDocumentIn) (*mcp.CallToolResult, ReadDocumentOut, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in readDocumentIn) (*mcp.CallToolResult, ReadDocumentOut, error) {
 		debugf("read_document doc_id=%q chapter_id=%q", in.DocID, in.ChapterID)
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, ReadDocumentOut{}, err
+		}
 		out, err := BuildReadDocument(c, in.DocID, in.ChapterID)
 		debugf("read_document result: %d toc entries, chapter=%v err=%v", len(out.TOC), out.Chapter != nil, err)
 		return nil, out, err
@@ -325,9 +363,13 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "search_docs",
 		Description: "Full text search over all chapters. Returns ranked hits with doc_id and chapter_id for read_document.",
-		InputSchema: CreateSearchDocsSchema(c),
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in searchDocsIn) (*mcp.CallToolResult, SearchDocsOut, error) {
+		InputSchema: CreateSearchDocsSchema(loaded),
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in searchDocsIn) (*mcp.CallToolResult, SearchDocsOut, error) {
 		debugf("search_docs query=%q product=%q version=%q scope=%q limit=%d fuzzy=%d regex=%v docs=%q", in.Query, in.Product, in.Version, in.Scope, in.Limit, in.Fuzzy, in.Regex, in.Docs)
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, SearchDocsOut{}, err
+		}
 		out := SearchDocs(c, in.Query, in.Product, in.Version, in.Scope, in.Limit, in.Fuzzy, in.Regex, in.Docs)
 		debugf("search_docs result: %d hits", len(out.Hits))
 		return nil, out, nil
@@ -336,8 +378,12 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "find_command",
 		Description: "Find the documented shell commands containing all given words and the chapters showing them.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in findCommandIn) (*mcp.CallToolResult, FindCommandOut, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in findCommandIn) (*mcp.CallToolResult, FindCommandOut, error) {
 		debugf("find_command pattern=%q docs=%q", in.Pattern, in.Docs)
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, FindCommandOut{}, err
+		}
 		out := FindCommand(c, in.Pattern, in.Docs)
 		debugf("find_command result: %d commands", len(out.Commands))
 		return nil, out, nil
@@ -346,8 +392,12 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "define_term",
 		Description: "Look up a term or abbreviation in the glossary.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in defineTermIn) (*mcp.CallToolResult, DefineTermOut, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in defineTermIn) (*mcp.CallToolResult, DefineTermOut, error) {
 		debugf("define_term term=%q docs=%q", in.Term, in.Docs)
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, DefineTermOut{}, err
+		}
 		out := DefineTerm(c, in.Term, in.Docs)
 		debugf("define_term result: %d entries", len(out.Entries))
 		return nil, out, nil
@@ -356,17 +406,18 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_glossary",
 		Description: "List every glossary term and definition, with the documents that use each term.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, ListGlossaryOut, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, ListGlossaryOut, error) {
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, ListGlossaryOut{}, err
+		}
 		out := ListGlossary(c)
 		debugf("list_glossary result: %d entries", len(out.Entries))
 		return nil, out, nil
 	})
-
-	addResources(srv, c)
-	return srv
 }
 
-func addResources(srv *mcp.Server, c *docparse.Corpus) {
+func addResources(srv *mcp.Server, p *PendingCorpus) {
 	jsonResult := func(uri string, v any) (*mcp.ReadResourceResult, error) {
 		data, err := json.MarshalIndent(v, "", "  ")
 		if err != nil {
@@ -378,7 +429,11 @@ func addResources(srv *mcp.Server, c *docparse.Corpus) {
 	srv.AddResource(&mcp.Resource{
 		URI: "docs://index", Name: "index", MIMEType: "application/json",
 		Description: "All documents with id, title, summary and product versions",
-	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, err
+		}
 		docs := []documentInfo{}
 		for i := range c.Documents {
 			docs = append(docs, info(&c.Documents[i]))
@@ -389,12 +444,20 @@ func addResources(srv *mcp.Server, c *docparse.Corpus) {
 	srv.AddResource(&mcp.Resource{
 		URI: "docs://glossary", Name: "glossary", MIMEType: "application/json",
 		Description: "The glossary shared by all documents",
-	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, err
+		}
 		return jsonResult(req.Params.URI, c.Glossary)
 	})
 
 	// docs://{doc_id} and docs://{doc_id}/{chapter_id}, same content as read_document
-	handler := func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	handler := func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, err
+		}
 		uri := req.Params.URI
 		// the #section_id of a reference uri names a section, the whole chapter is returned
 		path, _, _ := strings.Cut(strings.TrimPrefix(uri, "docs://"), "#")

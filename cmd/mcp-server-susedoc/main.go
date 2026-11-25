@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
@@ -39,6 +40,10 @@ func printCorpus(c *docparse.Corpus, asJSON bool) {
 // defaultImportDir is the FHS location packaged exports are installed to,
 // usually one subdirectory per package holding its <id>.json document files.
 const defaultImportDir = "/usr/share/doc/packages/mcp-server-susedoc.d"
+
+// loadTimeout is how long the stdio MCP server waits for the corpus to load
+// in the background before tool calls fail.
+const loadTimeout = 30 * time.Second
 
 type StringSlice []string
 
@@ -79,46 +84,66 @@ func main() {
 		importLocations = append(importLocations, "-")
 	}
 
-	corpus := docparse.NewCorpus()
-	if len(importLocations) > 0 {
-		for _, location := range importLocations {
-			if location == "-" {
-				location = defaultImportDir
+	// silence warnings if running as mcp over StdioTransport
+	if !debug.Enabled() && *webAddr == "" && *mcpAddr == "" {
+		debug.SetSilence(true)
+	}
+	load := func(ctx context.Context) (*docparse.Corpus, error) {
+		if len(importLocations) > 0 {
+			corpus := docparse.NewCorpus()
+			for _, location := range importLocations {
+				if location == "-" {
+					location = defaultImportDir
+				}
+				if err := corpus.Import(ctx, location); err != nil {
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					debug.Warn("main", err)
+				}
 			}
-			imported, err := corpus.Import(location)
-			debug.Warn("main", err)
-			for _, name := range imported {
-				debug.Printf("main", "imported %s", name)
+			if len(corpus.Documents) == 0 {
+				return nil, fmt.Errorf("no documents in %s", importLocations.String())
 			}
-		}
-		if len(corpus.Documents) == 0 {
-			fmt.Fprintf(os.Stderr, "error importing corpus: no documents in %s\n", importLocations.String())
-			os.Exit(1)
-		}
-		corpus.Finish()
-	} else {
-		// importing raw docs, silence warnings if runng as mcp over StdioTransport
-		if !debug.Enabled() && *webAddr == "" && *mcpAddr == "" {
-			debug.SetSilence(true)
+			corpus.Finish()
+			return corpus, nil
 		}
 		var docs []loader.DocFile
 		for _, dir := range directories {
 			found, err := loader.Find(dir)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "error reading input:", err)
-				os.Exit(1)
+				return nil, err
 			}
 			docs = append(docs, found...)
 		}
 		for _, f := range files {
 			docs = append(docs, loader.File(f))
 		}
-		var err error
-		corpus, err = loader.Load(docs)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error reading input:", err)
+		return loader.Load(docs)
+	}
+
+	// The default: serve the MCP server on stdin/stdout. It has to answer
+	// right away, as clients give up on a server that is slow to start, so
+	// the corpus is loaded in the background and tool calls wait for it.
+	if *mcpAddr == "" && *webAddr == "" && *exportDir == "" && !*dump && !*failWarn {
+		ctx := context.Background()
+		pending := mcpserver.LoadInBackground(ctx, loadTimeout, load)
+		go func() {
+			if _, err := pending.Wait(ctx, nil); err != nil {
+				fmt.Fprintln(os.Stderr, "error reading input:", err)
+			}
+		}()
+		if err := mcpserver.NewLoadingServer(pending).Run(ctx, &mcp.StdioTransport{}); err != nil {
+			fmt.Fprintln(os.Stderr, "mcp server:", err)
 			os.Exit(1)
 		}
+		return
+	}
+
+	corpus, err := load(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error reading input:", err)
+		os.Exit(1)
 	}
 	if *failWarn && debug.Warnings() > 0 {
 		fmt.Fprintf(os.Stderr, "error reading input: %d warnings\n", debug.Warnings())
@@ -216,7 +241,8 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	// The default: serve the MCP server on stdin/stdout.
+	// -failwarn without another mode: the corpus is checked, serve it on
+	// stdin/stdout.
 	if err := mcpserver.NewServer(corpus).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		fmt.Fprintln(os.Stderr, "mcp server:", err)
 		os.Exit(1)
