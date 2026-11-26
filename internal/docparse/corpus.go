@@ -4,9 +4,11 @@ import (
 	"maps"
 	"math"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/hbollon/go-edlib"
@@ -120,13 +122,14 @@ func (c *Corpus) Finish() {
 	c.commands = nil
 	c.xrefIndex = map[string][]xrefLoc{}
 	c.termDocs = map[string][]string{}
+	chapterTerms := c.chapterTerms()
 	for d := range c.Documents {
 		doc := &c.Documents[d]
 		seenTerms := map[string]bool{}
 		for i := range doc.Chapters {
 			c.total++
 			ch := &doc.Chapters[i]
-			for _, term := range c.termsIn(ch.Prose) {
+			for _, term := range chapterTerms[d][i] {
 				seenTerms[term] = true
 			}
 			// The chapter id navigates to the whole chapter.
@@ -153,6 +156,32 @@ func (c *Corpus) Finish() {
 			c.termDocs[term] = append(c.termDocs[term], doc.ID)
 		}
 	}
+}
+
+// chapterTerms returns termsIn for the prose of every chapter, indexed by
+// document and chapter. Matching the glossary is the slow part of Finish, so
+// the chapters are spread over all CPUs.
+func (c *Corpus) chapterTerms() [][][]string {
+	type job struct{ doc, chapter int }
+	out := make([][][]string, len(c.Documents))
+	jobs := make(chan job)
+	var wg sync.WaitGroup
+	for range runtime.GOMAXPROCS(0) {
+		wg.Go(func() {
+			for j := range jobs {
+				out[j.doc][j.chapter] = c.termsIn(c.Documents[j.doc].Chapters[j.chapter].Prose)
+			}
+		})
+	}
+	for d := range c.Documents {
+		out[d] = make([][]string, len(c.Documents[d].Chapters))
+		for i := range c.Documents[d].Chapters {
+			jobs <- job{d, i}
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	return out
 }
 
 // XrefTargets resolves the chapter's cross references against the whole corpus.
