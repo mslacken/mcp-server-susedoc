@@ -1,6 +1,6 @@
 module mcp-server-susedoc
 
-go 1.27.2
+go 1.26.0
 
 require (
 	github.com/gomarkdown/markdown v0.0.0-20261022144421-6c848fa1b723
