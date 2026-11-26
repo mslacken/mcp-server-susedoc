@@ -124,7 +124,7 @@ type GlossaryEntry struct {
 | `file` | File the chapter was written in: the DocBook topic file, the markdown file (the original one for combined files) or the text file |
 | `commands` | Shell commands shown in the chapter |
 | `sections` | Headings below the chapter heading |
-| `xrefs` | Linkends (target ids) of the chapter's cross references; only DocBook chapters have them |
+| `xrefs` | Linkends (target ids) of the chapter's cross references: DocBook `xref`s and markdown links to an anchor, like `[text](#target)` |
 
 **Section**
 
@@ -149,9 +149,16 @@ type XrefTarget struct {
     SectionID string `json:"section_id,omitempty"`
     Title     string `json:"title,omitempty"`
     Scope     string `json:"scope,omitempty"` // "chapter" or "section"
+    URI       string `json:"uri,omitempty"`   // docs://{doc_id}/{chapter_id}[#{section_id}]
 }
 ```
 
+`uri` is the resource to read the target with, the section is its fragment.
+The chapter markdown `read_document` returns is adapted to match: links to a
+resolved anchor point to its `uri`, and headings without an explicit `{#id}`
+get the id of their chapter or section, so the fragment names a heading. The
+stored corpus and the export keep the markdown as written. The web interface
+points `docs://` links to its `/chapter/{doc_id}/{chapter_id}` pages.
 If `resolved` is `false` the linkend is not a navigable target anywhere in the
 corpus and only `linkend` and `text` are set.
 
@@ -195,7 +202,17 @@ The MCP server exposes the following tools:
   by product and version
 * `read_document` — returns a document's metadata and table of contents, or
   a single chapter's markdown plus the commands it shows, the glossary terms
-  it mentions and where its cross references resolve to
+  it mentions and where its cross references resolve to. The table of
+  contents gives the size in characters of each chapter and the ids and
+  sizes of its top level sections; with `section_id` only that section and
+  its subsections are returned (with the commands, glossary terms and
+  references in it), together with the outline one level below, so large
+  chapters can be read piece by piece. The returned markdown is limited to
+  `-maxchars` characters: longer text is cut at a paragraph boundary (never
+  inside a code block if it can be helped, otherwise the fence is closed and
+  reopened on the next page) and the result carries `truncated`,
+  `total_chars` and `next_offset`, to be passed as `offset` to read on;
+  `max_chars` lowers the limit for a single call
 * `search_docs` — full text search over all chapters with tf-idf ranking,
   optional fuzzy matching, regex mode and product/version scope
 * `find_command` — backward search for where a shell command is mentioned in
@@ -209,7 +226,10 @@ The same data is also available as MCP resources:
 * `docs://index` — the document list
 * `docs://glossary` — the glossary
 * `docs://{doc_id}` — a document's metadata and table of contents
-* `docs://{doc_id}/{chapter_id}` — a chapter's markdown
+* `docs://{doc_id}/{chapter_id}` — a chapter's markdown, followed by a
+  `References` list linking every cross reference to the `uri` of its target;
+  a `#{section_id}` fragment, as in the `uri` of a section, is accepted and
+  returns the whole chapter
 
 There is a web interface that renders each tool's result in a server-side
 template and a JSON API at `/api/{tool}` (plus `/api/corpus` for a corpus
@@ -246,6 +266,19 @@ Addresses are given as `host[:port]`, the port defaults to 8080.
 Other flags: `-debug` logs tool calls, web requests and parsing problems to
 stderr, `-failwarn` exits with an error if there were warnings while reading
 (like skipped files), `-version`/`-v` prints the version.
+
+The stdio MCP server answers right away and loads the documents in the
+background. `-loadwait DURATION` (default `30s`, `0` for no limit) is how long
+a tool call waits for them before it fails with an error asking to try again;
+the loading goes on, so a later call succeeds. `-loadtimeout DURATION`
+(default `0`, no limit) stops loading after the duration in every mode, after
+which tool calls fail.
+
+`-maxchars N` (default `20000`, `0` for no limit) limits the characters of
+markdown `read_document` and the `docs://{doc_id}/{chapter_id}` resource
+return per call. A truncated resource ends with a note how to read on with
+`read_document`; a table of contents larger than the limit leaves out the
+section outlines. The web interface is not limited.
 
 Examples:
 

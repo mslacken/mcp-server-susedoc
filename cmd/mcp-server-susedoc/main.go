@@ -6,17 +6,16 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
 	"mcp-server-susedoc/internal/docparse/loader"
-	"mcp-server-susedoc/internal/docparse/markdown"
 	"mcp-server-susedoc/internal/mcpserver"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -60,11 +59,13 @@ func main() {
 	flag.Var(&importLocations, "import", "read documents in the internal format from PATH instead of -d/-f, may be given more than once; PATH is a document file or a directory searched recursively for *.json files; - reads "+defaultImportDir)
 	exportDir := flag.String("export", "", "write the corpus in the internal format to the directory PATH, one <id>.json file per document, then exit")
 	mcpAddr := flag.String("mcp", "", "by default the binary serves the documents as an MCP server over stdin/stdout; with an address argument (a.g. localhost:8080) it listens on that address and is exposed at /mcp over http(s). Giving -mcp without an argument is the same as the default")
-	web := flag.String("web", "", "serve the documents as a small web interface from the given adress a.g. localhost:8080")
+	webAddr := flag.String("web", "", "serve the documents as a small web interface from the given adress a.g. localhost:8080")
 	tlsDir := flag.String("tls", "", "directory holding the tls certificate and private key .pem files; with -web the server is served over https and with -mcp addr the server is exposed at https://addr/mcp")
-	tree := flag.Bool("tree", false, "dump the raw markdown node tree as json")
 	dump := flag.Bool("dump", false, "print the corpus to stdout instead of serving it as an MCP server")
 	asJSON := flag.Bool("json", false, "with -dump, print documents as json instead of yaml")
+	loadWait := flag.Duration("loadwait", 30*time.Second, "how long a tool call to the stdio MCP server waits for the documents still loading in the background before it fails with an error asking to try again; the loading goes on; 0 waits without a limit")
+	loadTimeout := flag.Duration("loadtimeout", 0, "stop loading the documents after this duration, e.g. 2m, and fail all tool calls; 0 means no limit")
+	maxChars := flag.Int("maxchars", 20000, "maximum characters of markdown the read_document tool and the chapter resources return per call; longer chapters are split into pages read with the offset argument; 0 means no limit")
 	debugFlag := flag.Bool("debug", false, "log tool calls, web requests and DocBook parsing problems to stderr")
 	failWarn := flag.Bool("failwarn", false, "exit with an error if there were warnings while reading the documents, like files that were skipped")
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -77,68 +78,78 @@ func main() {
 	debug.SetEnabled(*debugFlag)
 	files = append(files, flag.Args()...)
 
-	var err error
-	if *tree {
-		var data []byte
-		if len(files) > 0 {
-			data, err = os.ReadFile(files[0])
-		} else {
-			data, err = io.ReadAll(os.Stdin)
-		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error reading input:", err)
-			os.Exit(1)
-		}
-		enc, err := json.MarshalIndent(markdown.BuildTree(data), "", "  ")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error encoding json:", err)
-			os.Exit(1)
-		}
-		fmt.Println(string(enc))
-		os.Exit(0)
-	}
-
 	// without any input use the packaged exports
 	if len(importLocations) == 0 && len(directories) == 0 && len(files) == 0 {
 		importLocations = append(importLocations, "-")
 	}
 
-	corpus := docparse.NewCorpus()
-	if len(importLocations) > 0 {
-		for _, location := range importLocations {
-			if location == "-" {
-				location = defaultImportDir
+	// silence warnings if running as mcp over StdioTransport
+	if !debug.Enabled() && *webAddr == "" && *mcpAddr == "" {
+		debug.SetSilence(true)
+	}
+	load := func(ctx context.Context) (*docparse.Corpus, error) {
+		if len(importLocations) > 0 {
+			corpus := docparse.NewCorpus()
+			for _, location := range importLocations {
+				if location == "-" {
+					location = defaultImportDir
+				}
+				if err := corpus.Import(ctx, location); err != nil {
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					debug.Warn("main", err)
+				}
 			}
-			imported, err := corpus.Import(location)
-			debug.Warn("main", err)
-			for _, name := range imported {
-				debug.Printf("main", "imported %s", name)
+			if len(corpus.Documents) == 0 {
+				return nil, fmt.Errorf("no documents in %s", importLocations.String())
 			}
+			if err := corpus.FinishContext(ctx); err != nil {
+				return nil, err
+			}
+			return corpus, nil
 		}
-		if len(corpus.Documents) == 0 {
-			fmt.Fprintf(os.Stderr, "error importing corpus: no documents in %s\n", importLocations.String())
-			os.Exit(1)
-		}
-		corpus.Finish()
-	} else {
 		var docs []loader.DocFile
 		for _, dir := range directories {
 			found, err := loader.Find(dir)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "error reading input:", err)
-				os.Exit(1)
+				return nil, err
 			}
 			docs = append(docs, found...)
 		}
 		for _, f := range files {
 			docs = append(docs, loader.File(f))
 		}
-		var err error
-		corpus, err = loader.Load(docs)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error reading input:", err)
+		return loader.Load(ctx, docs)
+	}
+
+	// The default: serve the MCP server on stdin/stdout. It has to answer
+	// right away, as clients give up on a server that is slow to start, so
+	// the corpus is loaded in the background and tool calls wait for it.
+	if *mcpAddr == "" && *webAddr == "" && *exportDir == "" && !*dump && !*failWarn {
+		ctx := context.Background()
+		pending := mcpserver.LoadInBackground(ctx, *loadTimeout, *loadWait, load)
+		go func() {
+			if _, err := pending.Wait(ctx, nil); err != nil {
+				fmt.Fprintln(os.Stderr, "error reading input:", err)
+			}
+		}()
+		if err := mcpserver.NewLoadingServer(pending, mcpserver.Options{MaxChars: *maxChars}).Run(ctx, &mcp.StdioTransport{}); err != nil {
+			fmt.Fprintln(os.Stderr, "mcp server:", err)
 			os.Exit(1)
 		}
+		return
+	}
+
+	loadCtx, cancel := context.Background(), context.CancelFunc(func() {})
+	if *loadTimeout > 0 {
+		loadCtx, cancel = context.WithTimeout(loadCtx, *loadTimeout)
+	}
+	corpus, err := load(loadCtx)
+	cancel()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error reading input:", err)
+		os.Exit(1)
 	}
 	if *failWarn && debug.Warnings() > 0 {
 		fmt.Fprintf(os.Stderr, "error reading input: %d warnings\n", debug.Warnings())
@@ -205,7 +216,7 @@ func main() {
 			}
 			scheme = "https"
 		}
-		srv := mcpserver.NewServer(corpus)
+		srv := mcpserver.NewServer(corpus, mcpserver.Options{MaxChars: *maxChars})
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil))
 		fmt.Fprintf(os.Stderr, "serving mcp server on %s://%s/mcp\n", scheme, addr)
@@ -214,8 +225,8 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if *web != "" {
-		addr, err := parseAddress(*web)
+	if *webAddr != "" {
+		addr, err := parseAddress(*webAddr)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "web:", err)
 			os.Exit(1)
@@ -236,8 +247,9 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	// The default: serve the MCP server on stdin/stdout.
-	if err := mcpserver.NewServer(corpus).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+	// -failwarn without another mode: the corpus is checked, serve it on
+	// stdin/stdout.
+	if err := mcpserver.NewServer(corpus, mcpserver.Options{MaxChars: *maxChars}).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		fmt.Fprintln(os.Stderr, "mcp server:", err)
 		os.Exit(1)
 	}

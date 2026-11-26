@@ -1,12 +1,15 @@
 package docparse
 
 import (
+	"context"
 	"maps"
 	"math"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/hbollon/go-edlib"
@@ -109,6 +112,12 @@ func (c *Corpus) term(term string) *GlossaryEntry {
 // used by search and the index of commands used by FindCommand. Which glossary
 // terms a chapter mentions is computed on demand, when the chapter is served.
 func (c *Corpus) Finish() {
+	_ = c.FinishContext(context.Background())
+}
+
+// FinishContext is Finish, but stops and returns ctx.Err() once ctx is done.
+// The corpus must not be used then.
+func (c *Corpus) FinishContext(ctx context.Context) error {
 	for term := range c.Glossary {
 		e := c.Glossary[term]
 		e.match = glossaryMatchers(e.Term)
@@ -120,13 +129,17 @@ func (c *Corpus) Finish() {
 	c.commands = nil
 	c.xrefIndex = map[string][]xrefLoc{}
 	c.termDocs = map[string][]string{}
+	chapterTerms, err := c.chapterTerms(ctx)
+	if err != nil {
+		return err
+	}
 	for d := range c.Documents {
 		doc := &c.Documents[d]
 		seenTerms := map[string]bool{}
 		for i := range doc.Chapters {
 			c.total++
 			ch := &doc.Chapters[i]
-			for _, term := range c.termsIn(ch.Prose) {
+			for _, term := range chapterTerms[d][i] {
 				seenTerms[term] = true
 			}
 			// The chapter id navigates to the whole chapter.
@@ -153,6 +166,43 @@ func (c *Corpus) Finish() {
 			c.termDocs[term] = append(c.termDocs[term], doc.ID)
 		}
 	}
+	return nil
+}
+
+// chapterTerms returns termsIn for the prose of every chapter, indexed by
+// document and chapter. Matching the glossary is the slow part of Finish, so
+// the chapters are spread over all CPUs. It stops once ctx is done.
+func (c *Corpus) chapterTerms(ctx context.Context) ([][][]string, error) {
+	type job struct{ doc, chapter int }
+	out := make([][][]string, len(c.Documents))
+	jobs := make(chan job)
+	var wg sync.WaitGroup
+	for range runtime.GOMAXPROCS(0) {
+		wg.Go(func() {
+			for j := range jobs {
+				out[j.doc][j.chapter] = c.termsIn(c.Documents[j.doc].Chapters[j.chapter].Prose)
+			}
+		})
+	}
+	for d := range c.Documents {
+		out[d] = make([][]string, len(c.Documents[d].Chapters))
+	}
+queue:
+	for d := range c.Documents {
+		for i := range c.Documents[d].Chapters {
+			select {
+			case jobs <- job{d, i}:
+			case <-ctx.Done():
+				break queue
+			}
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // XrefTargets resolves the chapter's cross references against the whole corpus.
@@ -275,6 +325,12 @@ func (c *Corpus) termsIn(text string) []string {
 // prose, in term order.
 func (c *Corpus) GlossaryForChapter(ch *Chapter) []GlossaryEntry {
 	return c.GlossaryFor(c.termsIn(ch.Prose))
+}
+
+// GlossaryForText returns the definitions of all glossary terms mentioned in
+// prose, e.g. the Prose of a single section.
+func (c *Corpus) GlossaryForText(prose string) []GlossaryEntry {
+	return c.GlossaryFor(c.termsIn(prose))
 }
 
 // DocsUsing returns the ids of the documents whose chapters mention term, in

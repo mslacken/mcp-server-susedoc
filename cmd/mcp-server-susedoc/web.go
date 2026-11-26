@@ -116,7 +116,7 @@ func errorJSON(w http.ResponseWriter, status int, msg string) {
 // to it over an in-memory transport.
 func connect(ctx context.Context, c *docparse.Corpus) (*mcp.ClientSession, error) {
 	clientT, serverT := mcp.NewInMemoryTransports()
-	if _, err := mcpserver.NewServer(c).Connect(ctx, serverT, nil); err != nil {
+	if _, err := mcpserver.NewServer(c, mcpserver.Options{}).Connect(ctx, serverT, nil); err != nil {
 		return nil, err
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "mcp-server-susedoc-web", Version: mcpserver.Version}, nil)

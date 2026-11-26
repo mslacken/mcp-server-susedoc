@@ -67,14 +67,14 @@ func TestReadDocument(t *testing.T) {
 	require.Len(t, c.Documents, 1)
 	require.Len(t, c.Glossary, 3)
 
-	tocOnly, err := BuildReadDocument(c, "guide", "")
+	tocOnly, err := BuildReadDocument(c, ReadDocumentIn{DocID: "guide", ChapterID: "", SectionID: ""}, 0)
 	require.NoError(t, err)
 	require.Len(t, tocOnly.TOC, 2)
 	assert.Equal(t, "setup", tocOnly.TOC[0].ID)
 	assert.Equal(t, "setup-2", tocOnly.TOC[1].ID)
 	assert.Nil(t, tocOnly.Chapter, "chapter in table-of-contents result")
 
-	out, err := BuildReadDocument(c, "guide", "setup")
+	out, err := BuildReadDocument(c, ReadDocumentIn{DocID: "guide", ChapterID: "setup", SectionID: ""}, 0)
 	require.NoError(t, err)
 	assert.Empty(t, out.TOC, "table of contents with a chapter")
 	ch := out.Chapter
@@ -87,10 +87,10 @@ func TestReadDocument(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"CIB (cluster information base)", "node"}, terms)
 	assert.Equal(t, []string{"crm configure show"}, ch.Commands)
-	second, err := BuildReadDocument(c, "guide", "setup-2")
+	second, err := BuildReadDocument(c, ReadDocumentIn{DocID: "guide", ChapterID: "setup-2", SectionID: ""}, 0)
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(second.Chapter.Markdown, "## Setup {#setup-2}\n"), "markdown = %q", second.Chapter.Markdown)
-	_, err = BuildReadDocument(c, "guide", "nope")
+	_, err = BuildReadDocument(c, ReadDocumentIn{DocID: "guide", ChapterID: "nope", SectionID: ""}, 0)
 	assert.Error(t, err, "unknown chapter")
 }
 
@@ -149,7 +149,7 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 	}
 	files, err := loader.Find(root)
 	require.NoError(t, err)
-	c, err := loader.Load(files)
+	c, err := loader.Load(context.Background(), files)
 	require.NoError(t, err)
 	hidden := []string{"source", "profile", "subtitle", "meta", "revisions", "bugtracker", "translation",
 		"topic_type", "render_as", "maintainer", "legacy_sources", "sections", "procedures", "admonitions",
@@ -171,7 +171,7 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 
 	ctx := context.Background()
 	st, ct := mcp.NewInMemoryTransports()
-	_, err = NewServer(c).Connect(ctx, st, nil)
+	_, err = NewServer(c, Options{}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -206,4 +206,170 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 		`"uri":"docs://sles-demo/task#sec"`, `## References\n\n- [Section](docs://sles-demo/task#sec)`} {
 		assert.Contains(t, all, want)
 	}
+}
+
+const sectionSample = `# Combined Documentation
+
+---
+
+<!-- Source: big/index.md -->
+
+---
+title: Big
+---
+
+# Big
+
+## Install
+
+Lead text.
+
+### Prepare
+
+The CIB must exist, see [Verify](#verify).
+
+` + "```" + `
+# zypper in demo
+` + "```" + `
+
+#### Repositories
+
+Add the node repositories.
+
+### Verify
+
+` + "```" + `
+# crm status
+` + "```" + `
+`
+
+func TestReadDocumentSection(t *testing.T) {
+	c := markdown.BuildDocuments(markdown.SplitSources([]byte(sectionSample+"\n---\n\n<!-- Source: big/ha-glossary.md -->\n\n# Glossary\n\nCIB (cluster information base)\n\nThe configuration.\n\nnode\n\nA cluster member.\n"), "combined.md"))
+	toc, err := BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "", SectionID: ""}, 0)
+	require.NoError(t, err)
+	require.Len(t, toc.TOC, 1)
+	install := toc.TOC[0]
+	assert.Positive(t, install.Chars)
+	var ids []string
+	for _, o := range install.Outline {
+		ids = append(ids, o.ID)
+		assert.Positive(t, o.Chars, o.ID)
+	}
+	assert.Equal(t, []string{"prepare", "verify"}, ids, "top level sections only")
+
+	out, err := BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "install", SectionID: "prepare"}, 0)
+	require.NoError(t, err)
+	ch := out.Chapter
+	require.NotNil(t, ch)
+	assert.Equal(t, "prepare", ch.SectionID)
+	assert.Equal(t, "Prepare", ch.Section)
+	assert.True(t, strings.HasPrefix(ch.Markdown, "### Prepare {#prepare}\n"), "markdown = %q", ch.Markdown)
+	assert.Contains(t, ch.Markdown, "#### Repositories", "subsections are included")
+	assert.NotContains(t, ch.Markdown, "Verify {#verify}", "following section is excluded")
+	assert.NotContains(t, ch.Markdown, "Lead text")
+	assert.Equal(t, []string{"zypper in demo"}, ch.Commands)
+	require.Len(t, ch.Outline, 1)
+	assert.Equal(t, "repositories", ch.Outline[0].ID)
+	var terms []string
+	for _, g := range ch.Glossary {
+		terms = append(terms, g.Term)
+	}
+	assert.ElementsMatch(t, []string{"CIB (cluster information base)", "node"}, terms)
+	require.Len(t, ch.References, 1)
+	assert.Equal(t, "verify", ch.References[0].Linkend)
+
+	verify, err := BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "install", SectionID: "verify"}, 0)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"crm status"}, verify.Chapter.Commands)
+	assert.Empty(t, verify.Chapter.References)
+	assert.Empty(t, verify.Chapter.Glossary)
+
+	whole, err := BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "install", SectionID: "install"}, 0)
+	require.NoError(t, err)
+	assert.Contains(t, whole.Chapter.Markdown, "Lead text", "the chapter id as section returns the whole chapter")
+
+	_, err = BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "install", SectionID: "nope"}, 0)
+	assert.Error(t, err, "unknown section")
+	_, err = BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "", SectionID: "prepare"}, 0)
+	assert.Error(t, err, "section without chapter")
+}
+
+func TestReadDocumentPaging(t *testing.T) {
+	c := markdown.BuildDocuments(markdown.SplitSources([]byte(sectionSample), "combined.md"))
+	full, err := BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "install"}, 0)
+	require.NoError(t, err)
+	whole := full.Chapter.Markdown
+	assert.False(t, full.Chapter.Truncated)
+	assert.Equal(t, chars(whole), full.Chapter.TotalChars)
+
+	// read the chapter page by page with a server limit
+	var joined strings.Builder
+	var cmds []string
+	pages := 0
+	for offset := 0; ; pages++ {
+		out, err := BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "install", Offset: offset}, 60)
+		require.NoError(t, err)
+		ch := out.Chapter
+		assert.Equal(t, offset, ch.Offset)
+		assert.Equal(t, chars(whole), ch.TotalChars)
+		assert.Equal(t, ch.NextOffset > 0, ch.Truncated)
+		joined.WriteString(string([]rune(whole)[offset:max(ch.NextOffset, offset)]))
+		cmds = append(cmds, ch.Commands...)
+		if !ch.Truncated {
+			joined.WriteString(string([]rune(whole)[offset:]))
+			break
+		}
+		offset = ch.NextOffset
+	}
+	assert.Greater(t, pages, 1)
+	assert.Equal(t, whole, joined.String())
+	assert.ElementsMatch(t, []string{"zypper in demo", "crm status"}, cmds, "every command on exactly one page")
+
+	// max_chars lowers the server limit but cannot raise it
+	low, err := BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "install", MaxChars: 60}, 0)
+	require.NoError(t, err)
+	assert.True(t, low.Chapter.Truncated)
+	high, err := BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "install", MaxChars: 100000}, 60)
+	require.NoError(t, err)
+	assert.True(t, high.Chapter.Truncated)
+
+	// sections are paged as well
+	sec, err := BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "install", SectionID: "prepare"}, 40)
+	require.NoError(t, err)
+	assert.True(t, sec.Chapter.Truncated)
+	assert.Equal(t, "prepare", sec.Chapter.SectionID)
+
+	_, err = BuildReadDocument(c, ReadDocumentIn{DocID: "big", ChapterID: "install", Offset: 100000}, 60)
+	assert.Error(t, err, "offset beyond the text")
+
+	// a table of contents larger than the limit loses its outlines
+	toc, err := BuildReadDocument(c, ReadDocumentIn{DocID: "big"}, 20)
+	require.NoError(t, err)
+	assert.Empty(t, toc.TOC[0].Outline)
+	toc, err = BuildReadDocument(c, ReadDocumentIn{DocID: "big"}, 100000)
+	require.NoError(t, err)
+	assert.NotEmpty(t, toc.TOC[0].Outline)
+}
+
+func TestChapterResourceTruncated(t *testing.T) {
+	c := markdown.BuildDocuments(markdown.SplitSources([]byte(sectionSample), "combined.md"))
+	ctx := context.Background()
+	st, ct := mcp.NewInMemoryTransports()
+	_, err := NewServer(c, Options{MaxChars: 60}).Connect(ctx, st, nil)
+	require.NoError(t, err)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	defer func() { _ = cs.Close() }()
+	res, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{URI: "docs://big/install"})
+	require.NoError(t, err)
+	text := res.Contents[0].Text
+	assert.Contains(t, text, "Truncated after")
+	assert.Contains(t, text, `chapter_id "install"`)
+
+	tool, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "read_document", Arguments: map[string]any{"doc_id": "big", "chapter_id": "install"}})
+	require.NoError(t, err)
+	require.False(t, tool.IsError)
+	data, _ := json.Marshal(tool.StructuredContent)
+	assert.Contains(t, string(data), `"truncated":true`)
+	assert.Contains(t, string(data), `"next_offset":`)
 }

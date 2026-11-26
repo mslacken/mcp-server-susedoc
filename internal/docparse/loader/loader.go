@@ -4,6 +4,7 @@
 package loader
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -99,8 +100,9 @@ func Find(dir string) ([]DocFile, error) {
 // the corpus from what they read. The part of each importer goes where its
 // first file is, so that the document order and the first definition winning
 // for a glossary term stay deterministic. Unreadable files are skipped with a
-// warning; it is an error if no document is left.
-func Load(files []DocFile) (*docparse.Corpus, error) {
+// warning; it is an error if no document is left. Once ctx is done loading
+// stops and ctx.Err() is returned.
+func Load(ctx context.Context, files []DocFile) (*docparse.Corpus, error) {
 	var order []docparse.Importer
 	sources := map[string][]docparse.Source{}
 	for _, f := range files {
@@ -118,10 +120,13 @@ func Load(files []DocFile) (*docparse.Corpus, error) {
 		wg.Go(func() {
 			srcs := sources[imp.Name()]
 			debugf("importing %d %s files", len(srcs), imp.Name())
-			parts[i], errs[i] = imp.Import(srcs)
+			parts[i], errs[i] = imp.Import(ctx, srcs)
 		})
 	}
 	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	c := docparse.NewCorpus()
 	for i := range order {
@@ -132,7 +137,9 @@ func Load(files []DocFile) (*docparse.Corpus, error) {
 		return nil, fmt.Errorf("no usable documents found")
 	}
 	debugf("created corpus")
-	c.Finish()
+	if err := c.FinishContext(ctx); err != nil {
+		return nil, err
+	}
 	debugf("finished")
 	return c, nil
 }

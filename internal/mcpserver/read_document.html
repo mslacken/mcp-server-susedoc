@@ -22,21 +22,41 @@
           {{range .toc}}
             <li>
               <a href="/chapter/{{$doc.id}}/{{.id}}">{{esc .title}}{{if .summary}} <span class="hint">&mdash; {{esc .summary}}</span>{{end}}</a>
-              <span class="n">{{.commands}} cmd</span>
+              <span class="n">{{.chars}} chars &middot; {{.commands}} cmd</span>
+              {{if .outline}}{{$ch := .id}}
+                <ul class="toc">
+                  {{range .outline}}
+                    <li><a href="/chapter/{{$doc.id}}/{{$ch}}?section_id={{.id}}">{{if .number}}{{esc .number}} {{end}}{{esc .title}}</a><span class="n">{{.chars}} chars</span></li>
+                  {{end}}
+                </ul>
+              {{end}}
             </li>
           {{end}}
         </ul>
       </div>
     {{end}}
 
-    {{with .chapter}}
+    {{with .chapter}}{{$chap := .}}
       <div class="result-card">
         <h2 style="margin:0 0 4px">{{esc .title}}</h2>
         {{if .file}}<div class="meta">source: <code>{{esc .file}}</code></div>{{end}}
-        <div class="section-h">Chapter</div>
+        {{if .section_id}}
+          <div class="meta">section <b>{{esc .section_title}}</b> &mdash; <a href="/chapter/{{$doc.id}}/{{.id}}">whole chapter</a></div>
+          <div class="section-h">Section</div>
+        {{else}}
+          <div class="section-h">Chapter</div>
+        {{end}}
         {{markdown .markdown}}
+        {{if .outline}}
+          <div class="section-h">Subsections</div>
+          <ul class="toc">
+            {{range .outline}}
+              <li><a href="/chapter/{{$doc.id}}/{{$chap.id}}?section_id={{.id}}">{{if .number}}{{esc .number}} {{end}}{{esc .title}}</a><span class="n">{{.chars}} chars</span></li>
+            {{end}}
+          </ul>
+        {{end}}
         {{if .commands}}
-          <div class="section-h">Commands in this chapter</div>
+          <div class="section-h">Commands in this {{if .section_id}}section{{else}}chapter{{end}}</div>
           <div class="chips">{{range .commands}}<code>{{esc .}}</code> {{end}}</div>
         {{end}}
         {{if .glossary}}

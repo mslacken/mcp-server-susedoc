@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	rdebug "runtime/debug"
+	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"mcp-server-susedoc/internal/debug"
 	"mcp-server-susedoc/internal/docparse"
@@ -34,23 +36,44 @@ type ListDocumentsOut struct {
 	Documents []documentInfo `json:"documents"`
 }
 
-type readDocumentIn struct {
+type ReadDocumentIn struct {
 	DocID     string `json:"doc_id" jsonschema:"document id as returned by list_documents or search_docs"`
 	ChapterID string `json:"chapter_id,omitempty" jsonschema:"chapter id from the table of contents; if omitted only the table of contents is returned"`
+	SectionID string `json:"section_id,omitempty" jsonschema:"section id from the outline of a chapter; if given only that section and its subsections are returned instead of the whole chapter"`
+	Offset    int    `json:"offset,omitempty" jsonschema:"character offset in the markdown of the chapter or section to start at, the next_offset of a truncated result; default 0"`
+	MaxChars  int    `json:"max_chars,omitempty" jsonschema:"maximum characters of markdown to return, lowers the server's limit but cannot raise it; default the server's limit"`
 }
 
 type tocEntry struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Summary  string `json:"summary,omitempty"`
-	Commands int    `json:"commands"`
+	ID       string         `json:"id"`
+	Title    string         `json:"title"`
+	Summary  string         `json:"summary,omitempty"`
+	Commands int            `json:"commands"`
+	Chars    int            `json:"chars"`
+	Outline  []outlineEntry `json:"outline,omitempty"`
+}
+
+// outlineEntry is a section that can be read on its own with section_id.
+// Chars is the size of its markdown including its subsections.
+type outlineEntry struct {
+	ID     string `json:"id"`
+	Number string `json:"number,omitempty"`
+	Title  string `json:"title"`
+	Chars  int    `json:"chars"`
 }
 
 type chapterOut struct {
 	ID         string                   `json:"id"`
 	Title      string                   `json:"title"`
 	File       string                   `json:"file,omitempty"`
+	SectionID  string                   `json:"section_id,omitempty"`
+	Section    string                   `json:"section_title,omitempty"`
 	Markdown   string                   `json:"markdown"`
+	TotalChars int                      `json:"total_chars"`
+	Offset     int                      `json:"offset,omitempty"`
+	NextOffset int                      `json:"next_offset,omitempty"`
+	Truncated  bool                     `json:"truncated,omitempty"`
+	Outline    []outlineEntry           `json:"outline,omitempty"`
 	Commands   []string                 `json:"commands,omitempty"`
 	Glossary   []docparse.GlossaryEntry `json:"glossary,omitempty"`
 	References []docparse.XrefTarget    `json:"references,omitempty"`
@@ -111,16 +134,56 @@ func info(d *docparse.Document) documentInfo {
 	return documentInfo{ID: d.ID, Title: d.Title, Distro: d.Distro, Product: d.Product, Chapters: len(d.Chapters)}
 }
 
-func BuildReadDocument(c *docparse.Corpus, docID, chapterID string) (ReadDocumentOut, error) {
+// Options configure the MCP server.
+type Options struct {
+	// MaxChars limits the characters of markdown read_document returns per
+	// call; longer text is split into pages read with offset. 0 means no
+	// limit.
+	MaxChars int
+}
+
+// BuildReadDocument returns the table of contents of a document, or one of
+// its chapters if in.ChapterID is set, or only one section of that chapter
+// with its subsections if in.SectionID is set as well. The table of contents
+// lists the size of every chapter and its top level sections, a section
+// result the subsections one level below it, so a client can read a large
+// chapter piece by piece.
+//
+// The markdown of a chapter or section is cut to at most maxChars characters
+// (0 for no limit), lowered further by in.MaxChars, starting at in.Offset; a
+// cut result is marked as truncated with the offset of the rest. The
+// commands, glossary terms and references are those of the returned part. If
+// the table of contents is larger than maxChars, the section outlines are
+// left out.
+func BuildReadDocument(c *docparse.Corpus, in ReadDocumentIn, maxChars int) (ReadDocumentOut, error) {
+	docID, chapterID, sectionID := in.DocID, in.ChapterID, in.SectionID
+	if in.MaxChars > 0 && (maxChars == 0 || in.MaxChars < maxChars) {
+		maxChars = in.MaxChars
+	}
 	doc := c.Document(docID)
 	if doc == nil {
 		return ReadDocumentOut{}, fmt.Errorf("unknown document %q, use list_documents to get the ids", docID)
 	}
 	out := ReadDocumentOut{documentInfo: info(doc)}
 	if chapterID == "" {
+		if sectionID != "" {
+			return ReadDocumentOut{}, fmt.Errorf("section_id %q needs a chapter_id", sectionID)
+		}
 		out.TOC = make([]tocEntry, 0, len(doc.Chapters))
-		for _, ch := range doc.Chapters {
-			out.TOC = append(out.TOC, tocEntry{ID: ch.ID, Title: ch.Title, Summary: ch.Summary, Commands: len(ch.Commands)})
+		for i := range doc.Chapters {
+			ch := &doc.Chapters[i]
+			served := docparse.ServedText(c.Text(ch), ch, nil)
+			out.TOC = append(out.TOC, tocEntry{
+				ID: ch.ID, Title: ch.Title, Summary: ch.Summary, Commands: len(ch.Commands),
+				Chars: chars(served), Outline: outline(ch, docparse.SplitSections(served), -1),
+			})
+		}
+		if maxChars > 0 {
+			if data, err := json.Marshal(out.TOC); err == nil && chars(string(data)) > maxChars {
+				for i := range out.TOC {
+					out.TOC[i].Outline = nil
+				}
+			}
 		}
 		return out, nil
 	}
@@ -129,12 +192,87 @@ func BuildReadDocument(c *docparse.Corpus, docID, chapterID string) (ReadDocumen
 		return ReadDocumentOut{}, fmt.Errorf("unknown chapter %q in document %q", chapterID, docID)
 	}
 	refs := nonNil(c.XrefTargets(doc.ID, ch))
-	out.Chapter = &chapterOut{
-		ID: ch.ID, Title: ch.Title, File: ch.File,
-		Markdown: docparse.ServedText(c.Text(ch), ch, refs), Commands: nonNil(ch.Commands), Glossary: c.GlossaryForChapter(ch),
-		References: refs,
+	served := docparse.ServedText(c.Text(ch), ch, refs)
+	md := served
+	chOut := &chapterOut{ID: ch.ID, Title: ch.Title, File: ch.File}
+	if sectionID != "" && sectionID != ch.ID {
+		idx := slices.IndexFunc(ch.Sections, func(s docparse.Section) bool { return s.ID == sectionID })
+		parts := docparse.SplitSections(served)
+		var ok bool
+		md, ok = parts[sectionID]
+		if idx < 0 || !ok {
+			return ReadDocumentOut{}, fmt.Errorf("unknown section %q in chapter %q of document %q, read the chapter's table of contents for the section ids", sectionID, chapterID, docID)
+		}
+		chOut.SectionID, chOut.Section = ch.Sections[idx].ID, ch.Sections[idx].Title
+		chOut.Outline = outline(ch, parts, idx)
 	}
+	page, err := pageText(md, in.Offset, maxChars)
+	if err != nil {
+		return ReadDocumentOut{}, err
+	}
+	chOut.Markdown, chOut.TotalChars, chOut.Offset = page.Text, page.Total, in.Offset
+	chOut.NextOffset, chOut.Truncated = page.Next, page.Next > 0
+	if chOut.SectionID == "" && in.Offset == 0 && !chOut.Truncated {
+		// the whole chapter
+		chOut.Commands, chOut.Glossary, chOut.References = nonNil(ch.Commands), c.GlossaryForChapter(ch), refs
+	} else {
+		chOut.Commands = commandsIn(ch.Commands, page.Text)
+		chOut.Glossary = c.GlossaryForText(docparse.Prose(page.Text))
+		chOut.References = refsIn(refs, page.Text)
+	}
+	out.Chapter = chOut
 	return out, nil
+}
+
+// outline returns the sections directly below the section at index parent of
+// ch, or the top level sections for parent -1, that have their own part in
+// parts and so can be read with section_id.
+func outline(ch *docparse.Chapter, parts map[string]string, parent int) []outlineEntry {
+	level := 0
+	if parent >= 0 {
+		level = ch.Sections[parent].Level
+	}
+	var out []outlineEntry
+	for _, s := range ch.Sections[parent+1:] {
+		if s.Level <= level {
+			break
+		}
+		if s.Level != level+1 {
+			continue
+		}
+		if md, ok := parts[s.ID]; ok && s.ID != "" {
+			out = append(out, outlineEntry{ID: s.ID, Number: s.Number, Title: s.Title, Chars: chars(md)})
+		}
+	}
+	return out
+}
+
+func chars(s string) int { return utf8.RuneCountInString(s) }
+
+// commandsIn returns the commands of the chapter that appear in md, a part of
+// its markdown. Whitespace is normalized, so commands joined from continued
+// lines are found as well.
+func commandsIn(cmds []string, md string) []string {
+	text := strings.Join(strings.Fields(strings.ReplaceAll(md, "\\\n", " ")), " ")
+	out := []string{}
+	for _, cmd := range cmds {
+		if strings.Contains(text, strings.Join(strings.Fields(cmd), " ")) {
+			out = append(out, cmd)
+		}
+	}
+	return out
+}
+
+// refsIn returns the cross references of the chapter that are linked from md,
+// a part of its served markdown.
+func refsIn(refs []docparse.XrefTarget, md string) []docparse.XrefTarget {
+	out := []docparse.XrefTarget{}
+	for _, r := range refs {
+		if (r.Resolved && strings.Contains(md, "]("+r.URI+")")) || strings.Contains(md, "](#"+r.Linkend+")") {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func nonNil[T any](s []T) []T {
@@ -251,10 +389,11 @@ func setEnum(s *jsonschema.Schema, prop string, values []string) {
 }
 
 // CreateListDocumentsSchema returns the input schema for list_documents with
-// product and version restricted to the values present in the corpus.
+// product and version restricted to the values present in the corpus, or
+// unrestricted if c is nil.
 func CreateListDocumentsSchema(c *docparse.Corpus) *jsonschema.Schema {
 	schema, _ := jsonschema.For[listDocumentsIn](nil)
-	if schema != nil {
+	if schema != nil && c != nil {
 		ov := CorpusSummary(c)
 		setEnum(schema, "product", ov.Products)
 		setEnum(schema, "version", ov.Versions)
@@ -264,13 +403,15 @@ func CreateListDocumentsSchema(c *docparse.Corpus) *jsonschema.Schema {
 
 // CreateSearchDocsSchema returns the input schema for search_docs with product
 // and version restricted to the values present in the corpus and scope to the
-// supported values.
+// supported values. Product and version are unrestricted if c is nil.
 func CreateSearchDocsSchema(c *docparse.Corpus) *jsonschema.Schema {
 	schema, _ := jsonschema.For[searchDocsIn](nil)
 	if schema != nil {
-		ov := CorpusSummary(c)
-		setEnum(schema, "product", ov.Products)
-		setEnum(schema, "version", ov.Versions)
+		if c != nil {
+			ov := CorpusSummary(c)
+			setEnum(schema, "product", ov.Products)
+			setEnum(schema, "version", ov.Versions)
+		}
 		setEnum(schema, "scope", []string{"all", "title", "summary"})
 	}
 	return schema
@@ -291,19 +432,50 @@ func init() {
 }
 
 // NewServer builds the MCP server exposing the corpus' documents.
-func NewServer(c *docparse.Corpus) *mcp.Server {
+func NewServer(c *docparse.Corpus, opts Options) *mcp.Server {
+	return NewLoadingServer(Ready(c), opts)
+}
+
+// NewLoadingServer builds the MCP server exposing the documents of a corpus
+// that may still be loading. Its tools are listed right away, without the
+// product and version enums, and are replaced with ones restricted to the
+// values in the corpus once it is loaded, which notifies the clients with
+// notifications/tools/list_changed. Tool calls and resource reads wait for
+// the corpus.
+func NewLoadingServer(p *PendingCorpus, opts Options) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "mcp-server-susedoc", Version: Version}, &mcp.ServerOptions{
 		Instructions: "Product documentation. Use search_docs or list_documents to find a document, " +
 			"read_document to get its table of contents or a chapter, find_command to find where a " +
 			"command is documented and define_term for the glossary.",
 	})
+	addTools(srv, p, opts)
+	addResources(srv, p, opts)
+	if p.loaded() == nil {
+		go func() {
+			if _, err := p.Wait(context.Background(), nil); err == nil {
+				debugf("corpus loaded, updating the tool schemas")
+				addTools(srv, p, opts)
+			}
+		}()
+	}
+	return srv
+}
+
+// addTools adds the tools to srv, replacing those already added. The input
+// schemas list the products and versions of the corpus if it is loaded.
+func addTools(srv *mcp.Server, p *PendingCorpus, opts Options) {
+	loaded := p.loaded()
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_documents",
 		Description: "List the available documents (guides) with id, title, summary and product versions.",
-		InputSchema: CreateListDocumentsSchema(c),
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in listDocumentsIn) (*mcp.CallToolResult, ListDocumentsOut, error) {
+		InputSchema: CreateListDocumentsSchema(loaded),
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in listDocumentsIn) (*mcp.CallToolResult, ListDocumentsOut, error) {
 		debugf("list_documents product=%q version=%q", in.Product, in.Version)
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, ListDocumentsOut{}, err
+		}
 		return nil, ListDocuments(c, in.Product, in.Version), nil
 	})
 
@@ -314,10 +486,19 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 			"and where the chapter's cross references point to (unresolved ones are reported as dead), " +
 			"each resolved reference with the docs:// uri of the resource to read its target; " +
 			"links in the markdown point to these uris and headings carry their {#id}, " +
-			"without the table of contents.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in readDocumentIn) (*mcp.CallToolResult, ReadDocumentOut, error) {
-		debugf("read_document doc_id=%q chapter_id=%q", in.DocID, in.ChapterID)
-		out, err := BuildReadDocument(c, in.DocID, in.ChapterID)
+			"without the table of contents. The table of contents gives the size in characters of every " +
+			"chapter and the ids and sizes of its top level sections; for a large chapter pass section_id " +
+			"to read only that section with its subsections (and the commands, glossary terms and references " +
+			"in it), its result lists the subsections one level below with their sizes. " +
+			"The markdown is limited in size: a result with truncated set holds only part of it, cut at a " +
+			"paragraph boundary, call again with offset set to its next_offset to read on, or read a section instead.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in ReadDocumentIn) (*mcp.CallToolResult, ReadDocumentOut, error) {
+		debugf("read_document doc_id=%q chapter_id=%q section_id=%q offset=%d max_chars=%d", in.DocID, in.ChapterID, in.SectionID, in.Offset, in.MaxChars)
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, ReadDocumentOut{}, err
+		}
+		out, err := BuildReadDocument(c, in, opts.MaxChars)
 		debugf("read_document result: %d toc entries, chapter=%v err=%v", len(out.TOC), out.Chapter != nil, err)
 		return nil, out, err
 	})
@@ -325,9 +506,13 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "search_docs",
 		Description: "Full text search over all chapters. Returns ranked hits with doc_id and chapter_id for read_document.",
-		InputSchema: CreateSearchDocsSchema(c),
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in searchDocsIn) (*mcp.CallToolResult, SearchDocsOut, error) {
+		InputSchema: CreateSearchDocsSchema(loaded),
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in searchDocsIn) (*mcp.CallToolResult, SearchDocsOut, error) {
 		debugf("search_docs query=%q product=%q version=%q scope=%q limit=%d fuzzy=%d regex=%v docs=%q", in.Query, in.Product, in.Version, in.Scope, in.Limit, in.Fuzzy, in.Regex, in.Docs)
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, SearchDocsOut{}, err
+		}
 		out := SearchDocs(c, in.Query, in.Product, in.Version, in.Scope, in.Limit, in.Fuzzy, in.Regex, in.Docs)
 		debugf("search_docs result: %d hits", len(out.Hits))
 		return nil, out, nil
@@ -336,8 +521,12 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "find_command",
 		Description: "Find the documented shell commands containing all given words and the chapters showing them.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in findCommandIn) (*mcp.CallToolResult, FindCommandOut, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in findCommandIn) (*mcp.CallToolResult, FindCommandOut, error) {
 		debugf("find_command pattern=%q docs=%q", in.Pattern, in.Docs)
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, FindCommandOut{}, err
+		}
 		out := FindCommand(c, in.Pattern, in.Docs)
 		debugf("find_command result: %d commands", len(out.Commands))
 		return nil, out, nil
@@ -346,8 +535,12 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "define_term",
 		Description: "Look up a term or abbreviation in the glossary.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in defineTermIn) (*mcp.CallToolResult, DefineTermOut, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in defineTermIn) (*mcp.CallToolResult, DefineTermOut, error) {
 		debugf("define_term term=%q docs=%q", in.Term, in.Docs)
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, DefineTermOut{}, err
+		}
 		out := DefineTerm(c, in.Term, in.Docs)
 		debugf("define_term result: %d entries", len(out.Entries))
 		return nil, out, nil
@@ -356,17 +549,18 @@ func NewServer(c *docparse.Corpus) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_glossary",
 		Description: "List every glossary term and definition, with the documents that use each term.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, ListGlossaryOut, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, ListGlossaryOut, error) {
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, ListGlossaryOut{}, err
+		}
 		out := ListGlossary(c)
 		debugf("list_glossary result: %d entries", len(out.Entries))
 		return nil, out, nil
 	})
-
-	addResources(srv, c)
-	return srv
 }
 
-func addResources(srv *mcp.Server, c *docparse.Corpus) {
+func addResources(srv *mcp.Server, p *PendingCorpus, opts Options) {
 	jsonResult := func(uri string, v any) (*mcp.ReadResourceResult, error) {
 		data, err := json.MarshalIndent(v, "", "  ")
 		if err != nil {
@@ -378,7 +572,11 @@ func addResources(srv *mcp.Server, c *docparse.Corpus) {
 	srv.AddResource(&mcp.Resource{
 		URI: "docs://index", Name: "index", MIMEType: "application/json",
 		Description: "All documents with id, title, summary and product versions",
-	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, err
+		}
 		docs := []documentInfo{}
 		for i := range c.Documents {
 			docs = append(docs, info(&c.Documents[i]))
@@ -389,22 +587,35 @@ func addResources(srv *mcp.Server, c *docparse.Corpus) {
 	srv.AddResource(&mcp.Resource{
 		URI: "docs://glossary", Name: "glossary", MIMEType: "application/json",
 		Description: "The glossary shared by all documents",
-	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, err
+		}
 		return jsonResult(req.Params.URI, c.Glossary)
 	})
 
 	// docs://{doc_id} and docs://{doc_id}/{chapter_id}, same content as read_document
-	handler := func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	handler := func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		c, err := p.Wait(ctx, req)
+		if err != nil {
+			return nil, err
+		}
 		uri := req.Params.URI
 		// the #section_id of a reference uri names a section, the whole chapter is returned
 		path, _, _ := strings.Cut(strings.TrimPrefix(uri, "docs://"), "#")
 		docID, chapterID, _ := strings.Cut(path, "/")
-		out, err := BuildReadDocument(c, docID, chapterID)
+		out, err := BuildReadDocument(c, ReadDocumentIn{DocID: docID, ChapterID: chapterID}, opts.MaxChars)
 		if err != nil {
 			return nil, mcp.ResourceNotFoundError(uri)
 		}
-		if out.Chapter != nil {
-			text := out.Chapter.Markdown + referencesMarkdown(out.Chapter.References)
+		if ch := out.Chapter; ch != nil {
+			text := ch.Markdown
+			if ch.Truncated {
+				text = strings.TrimRight(text, "\n") + fmt.Sprintf("\n\n_[Truncated after %d of %d characters. Read on with the read_document tool, "+
+					"doc_id %q, chapter_id %q and offset %d, or read single sections of the chapter with section_id.]_", ch.NextOffset, ch.TotalChars, docID, chapterID, ch.NextOffset)
+			}
+			text += referencesMarkdown(ch.References)
 			return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: uri, MIMEType: "text/markdown", Text: text}}}, nil
 		}
 		return jsonResult(uri, out)
