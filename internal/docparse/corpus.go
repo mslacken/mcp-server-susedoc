@@ -1,6 +1,7 @@
 package docparse
 
 import (
+	"context"
 	"maps"
 	"math"
 	"regexp"
@@ -111,6 +112,12 @@ func (c *Corpus) term(term string) *GlossaryEntry {
 // used by search and the index of commands used by FindCommand. Which glossary
 // terms a chapter mentions is computed on demand, when the chapter is served.
 func (c *Corpus) Finish() {
+	_ = c.FinishContext(context.Background())
+}
+
+// FinishContext is Finish, but stops and returns ctx.Err() once ctx is done.
+// The corpus must not be used then.
+func (c *Corpus) FinishContext(ctx context.Context) error {
 	for term := range c.Glossary {
 		e := c.Glossary[term]
 		e.match = glossaryMatchers(e.Term)
@@ -122,7 +129,10 @@ func (c *Corpus) Finish() {
 	c.commands = nil
 	c.xrefIndex = map[string][]xrefLoc{}
 	c.termDocs = map[string][]string{}
-	chapterTerms := c.chapterTerms()
+	chapterTerms, err := c.chapterTerms(ctx)
+	if err != nil {
+		return err
+	}
 	for d := range c.Documents {
 		doc := &c.Documents[d]
 		seenTerms := map[string]bool{}
@@ -156,12 +166,13 @@ func (c *Corpus) Finish() {
 			c.termDocs[term] = append(c.termDocs[term], doc.ID)
 		}
 	}
+	return nil
 }
 
 // chapterTerms returns termsIn for the prose of every chapter, indexed by
 // document and chapter. Matching the glossary is the slow part of Finish, so
-// the chapters are spread over all CPUs.
-func (c *Corpus) chapterTerms() [][][]string {
+// the chapters are spread over all CPUs. It stops once ctx is done.
+func (c *Corpus) chapterTerms(ctx context.Context) ([][][]string, error) {
 	type job struct{ doc, chapter int }
 	out := make([][][]string, len(c.Documents))
 	jobs := make(chan job)
@@ -175,13 +186,23 @@ func (c *Corpus) chapterTerms() [][][]string {
 	}
 	for d := range c.Documents {
 		out[d] = make([][]string, len(c.Documents[d].Chapters))
+	}
+queue:
+	for d := range c.Documents {
 		for i := range c.Documents[d].Chapters {
-			jobs <- job{d, i}
+			select {
+			case jobs <- job{d, i}:
+			case <-ctx.Done():
+				break queue
+			}
 		}
 	}
 	close(jobs)
 	wg.Wait()
-	return out
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // XrefTargets resolves the chapter's cross references against the whole corpus.

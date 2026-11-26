@@ -1,6 +1,7 @@
 package text
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -22,10 +23,13 @@ func (Importer) Match(p string) bool {
 }
 
 // Import reads the files in order.
-func (Importer) Import(files []docparse.Source) (docparse.Part, error) {
+func (Importer) Import(ctx context.Context, files []docparse.Source) (docparse.Part, error) {
 	var out docparse.Part
 	var errs []error
 	for _, f := range files {
+		if err := ctx.Err(); err != nil {
+			return docparse.Part{}, err
+		}
 		p, err := ReadFile(f.Path)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("skipping %s: %w", f.Path, err))

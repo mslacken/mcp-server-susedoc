@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -43,7 +44,7 @@ func importTree(t *testing.T, files map[string]string) *docparse.Corpus {
 		}
 		srcs = append(srcs, docparse.Source{Path: p, Root: root})
 	}
-	part, err := Importer{}.Import(srcs)
+	part, err := Importer{}.Import(context.Background(), srcs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +263,7 @@ func TestSuseExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	part, err := Importer{}.Import(srcs)
+	part, err := Importer{}.Import(context.Background(), srcs)
 	if err != nil {
 		t.Fatal(err)
 	}

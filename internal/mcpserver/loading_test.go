@@ -65,9 +65,9 @@ func TestLoadingServer(t *testing.T) {
 	require.NoError(t, err)
 
 	release := make(chan struct{})
-	p := LoadInBackground(context.Background(), time.Minute, func(context.Context) (*docparse.Corpus, error) {
+	p := LoadInBackground(context.Background(), time.Minute, 0, func(context.Context) (*docparse.Corpus, error) {
 		<-release
-		return loader.Load(files)
+		return loader.Load(context.Background(), files)
 	})
 	progress := make(chan float64, 10)
 	listChanged := make(chan struct{}, 1)
@@ -124,7 +124,7 @@ func TestLoadingServer(t *testing.T) {
 // load in time, and that the load is cancelled.
 func TestLoadingServerTimeout(t *testing.T) {
 	cancelled := make(chan struct{})
-	p := LoadInBackground(context.Background(), 50*time.Millisecond, func(ctx context.Context) (*docparse.Corpus, error) {
+	p := LoadInBackground(context.Background(), 50*time.Millisecond, 0, func(ctx context.Context) (*docparse.Corpus, error) {
 		<-ctx.Done()
 		close(cancelled)
 		return nil, ctx.Err()
@@ -136,4 +136,54 @@ func TestLoadingServerTimeout(t *testing.T) {
 	require.Len(t, res.Content, 1)
 	assert.Contains(t, res.Content[0].(*mcp.TextContent).Text, "timed out")
 	<-cancelled
+}
+
+// TestLoadingServerWait checks that a tool call gives up waiting for the
+// corpus after the wait duration while the load goes on, so that a later call
+// gets the loaded corpus.
+func TestLoadingServerWait(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range docbookFiles {
+		p := filepath.Join(root, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+	}
+	files, err := loader.Find(root)
+	require.NoError(t, err)
+
+	release := make(chan struct{})
+	p := LoadInBackground(context.Background(), 0, 50*time.Millisecond, func(ctx context.Context) (*docparse.Corpus, error) {
+		<-release
+		return loader.Load(ctx, files)
+	})
+	cs := connectPending(t, p, nil)
+	params := &mcp.CallToolParams{Name: "list_documents", Arguments: map[string]any{}}
+	res, err := cs.CallTool(context.Background(), params)
+	require.NoError(t, err)
+	assert.True(t, res.IsError)
+	require.Len(t, res.Content, 1)
+	assert.Contains(t, res.Content[0].(*mcp.TextContent).Text, "still loading")
+
+	close(release)
+	_, err = p.Wait(context.Background(), nil)
+	require.NoError(t, err)
+	res, err = cs.CallTool(context.Background(), params)
+	require.NoError(t, err)
+	assert.False(t, res.IsError, "%+v", res)
+}
+
+// TestLoadCancelled checks that loading stops once its context is done.
+func TestLoadCancelled(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range docbookFiles {
+		p := filepath.Join(root, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+	}
+	files, err := loader.Find(root)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = loader.Load(ctx, files)
+	assert.ErrorIs(t, err, context.Canceled)
 }

@@ -149,7 +149,7 @@ func TestDocBookFieldsNotExposed(t *testing.T) {
 	}
 	files, err := loader.Find(root)
 	require.NoError(t, err)
-	c, err := loader.Load(files)
+	c, err := loader.Load(context.Background(), files)
 	require.NoError(t, err)
 	hidden := []string{"source", "profile", "subtitle", "meta", "revisions", "bugtracker", "translation",
 		"topic_type", "render_as", "maintainer", "legacy_sources", "sections", "procedures", "admonitions",

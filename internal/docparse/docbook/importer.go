@@ -1,6 +1,7 @@
 package docbook
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -32,7 +33,7 @@ func (Importer) EntryFiles(dir string) []string {
 
 // Import reads the DC files in parallel and returns their documents in file
 // order.
-func (Importer) Import(files []docparse.Source) (docparse.Part, error) {
+func (Importer) Import(ctx context.Context, files []docparse.Source) (docparse.Part, error) {
 	loaders := map[string]*Loader{}
 	for _, f := range files {
 		if dir := filepath.Dir(f.Path); loaders[dir] == nil {
@@ -45,6 +46,9 @@ func (Importer) Import(files []docparse.Source) (docparse.Part, error) {
 	g.SetLimit(runtime.GOMAXPROCS(0))
 	for i, f := range files {
 		g.Go(func() error {
+			if ctx.Err() != nil {
+				return nil
+			}
 			debugf("reading %s", f.Path)
 			parts[i], errs[i] = loaders[filepath.Dir(f.Path)].Read(filepath.Base(f.Path))
 			if errs[i] != nil {
@@ -54,6 +58,9 @@ func (Importer) Import(files []docparse.Source) (docparse.Part, error) {
 		})
 	}
 	_ = g.Wait()
+	if err := ctx.Err(); err != nil {
+		return docparse.Part{}, err
+	}
 	var out docparse.Part
 	for i := range parts {
 		out.Merge(parts[i])

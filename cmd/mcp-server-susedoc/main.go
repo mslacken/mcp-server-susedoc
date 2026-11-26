@@ -41,10 +41,6 @@ func printCorpus(c *docparse.Corpus, asJSON bool) {
 // usually one subdirectory per package holding its <id>.json document files.
 const defaultImportDir = "/usr/share/doc/packages/mcp-server-susedoc.d"
 
-// loadTimeout is how long the stdio MCP server waits for the corpus to load
-// in the background before tool calls fail.
-const loadTimeout = 30 * time.Second
-
 type StringSlice []string
 
 func (s *StringSlice) String() string {
@@ -67,6 +63,8 @@ func main() {
 	tlsDir := flag.String("tls", "", "directory holding the tls certificate and private key .pem files; with -web the server is served over https and with -mcp addr the server is exposed at https://addr/mcp")
 	dump := flag.Bool("dump", false, "print the corpus to stdout instead of serving it as an MCP server")
 	asJSON := flag.Bool("json", false, "with -dump, print documents as json instead of yaml")
+	loadWait := flag.Duration("loadwait", 30*time.Second, "how long a tool call to the stdio MCP server waits for the documents still loading in the background before it fails with an error asking to try again; the loading goes on; 0 waits without a limit")
+	loadTimeout := flag.Duration("loadtimeout", 0, "stop loading the documents after this duration, e.g. 2m, and fail all tool calls; 0 means no limit")
 	debugFlag := flag.Bool("debug", false, "log tool calls, web requests and DocBook parsing problems to stderr")
 	failWarn := flag.Bool("failwarn", false, "exit with an error if there were warnings while reading the documents, like files that were skipped")
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -105,7 +103,9 @@ func main() {
 			if len(corpus.Documents) == 0 {
 				return nil, fmt.Errorf("no documents in %s", importLocations.String())
 			}
-			corpus.Finish()
+			if err := corpus.FinishContext(ctx); err != nil {
+				return nil, err
+			}
 			return corpus, nil
 		}
 		var docs []loader.DocFile
@@ -119,7 +119,7 @@ func main() {
 		for _, f := range files {
 			docs = append(docs, loader.File(f))
 		}
-		return loader.Load(docs)
+		return loader.Load(ctx, docs)
 	}
 
 	// The default: serve the MCP server on stdin/stdout. It has to answer
@@ -127,7 +127,7 @@ func main() {
 	// the corpus is loaded in the background and tool calls wait for it.
 	if *mcpAddr == "" && *webAddr == "" && *exportDir == "" && !*dump && !*failWarn {
 		ctx := context.Background()
-		pending := mcpserver.LoadInBackground(ctx, loadTimeout, load)
+		pending := mcpserver.LoadInBackground(ctx, *loadTimeout, *loadWait, load)
 		go func() {
 			if _, err := pending.Wait(ctx, nil); err != nil {
 				fmt.Fprintln(os.Stderr, "error reading input:", err)
@@ -140,7 +140,12 @@ func main() {
 		return
 	}
 
-	corpus, err := load(context.Background())
+	loadCtx, cancel := context.Background(), context.CancelFunc(func() {})
+	if *loadTimeout > 0 {
+		loadCtx, cancel = context.WithTimeout(loadCtx, *loadTimeout)
+	}
+	corpus, err := load(loadCtx)
+	cancel()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error reading input:", err)
 		os.Exit(1)

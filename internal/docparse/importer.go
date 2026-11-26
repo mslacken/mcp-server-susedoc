@@ -1,5 +1,7 @@
 package docparse
 
+import "context"
+
 // Source is an input file. Root is the directory the file was found in, or ""
 // if it was named directly.
 type Source struct {
@@ -16,8 +18,9 @@ type Importer interface {
 	Match(p string) bool
 	// Import reads files, all accepted by Match, in their order. Files that
 	// cannot be read are skipped: the part holds what was read and the error,
-	// if any, joins the reasons the others were skipped.
-	Import(files []Source) (Part, error)
+	// if any, joins the reasons the others were skipped. Once ctx is done the
+	// remaining files are skipped and ctx.Err() is returned.
+	Import(ctx context.Context, files []Source) (Part, error)
 }
 
 // DirImporter is an Importer for a format whose files are read through entry
