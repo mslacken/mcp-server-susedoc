@@ -6,6 +6,7 @@ package markdown_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -52,7 +53,7 @@ func TestReferenceMarkdown(t *testing.T) {
 	require.NotEmpty(t, files, "no markdown files in %s", markdownDir)
 	dumps := expectedDumps(t)
 
-	corpus, err := loader.Load(files)
+	corpus, err := loader.Load(context.Background(), files)
 	require.NoError(t, err)
 	require.Len(t, corpus.Documents, len(dumps), "documents imported vs. reference json files")
 
@@ -77,7 +78,7 @@ func TestReferenceMarkdown(t *testing.T) {
 func TestReferenceXrefs(t *testing.T) {
 	files, err := loader.Find(markdownDir)
 	require.NoError(t, err)
-	corpus, err := loader.Load(files)
+	corpus, err := loader.Load(context.Background(), files)
 	require.NoError(t, err)
 
 	xrefs := func(docID, chapterID string) []docparse.XrefTarget {

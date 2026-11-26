@@ -20,7 +20,7 @@ func connectPending(t *testing.T, p *PendingCorpus, opts *mcp.ClientOptions) *mc
 	t.Helper()
 	ctx := context.Background()
 	st, ct := mcp.NewInMemoryTransports()
-	_, err := NewLoadingServer(p).Connect(ctx, st, nil)
+	_, err := NewLoadingServer(p, Options{}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, opts).Connect(ctx, ct, nil)
 	require.NoError(t, err)

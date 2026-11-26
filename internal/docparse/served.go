@@ -71,3 +71,71 @@ func headingID(text string, first bool, ch *Chapter, next *int) string {
 	}
 	return ""
 }
+
+var reServedHeadingID = regexp.MustCompile(`\{#([^}\s]+)\}\s*$`)
+
+// SplitSections returns the parts of served chapter markdown, as returned by
+// ServedText, that start at a heading carrying an {#id}, keyed by that id. A
+// part runs up to the next heading of the same or a higher level, so it
+// includes its subsections. Headings in code blocks are ignored.
+func SplitSections(served string) map[string]string {
+	type heading struct {
+		line, level int
+		id          string
+	}
+	lines := strings.Split(served, "\n")
+	var hs []heading
+	fenced := false
+	for i, ln := range lines {
+		if reServedFence.MatchString(ln) {
+			fenced = !fenced
+			continue
+		}
+		if fenced {
+			continue
+		}
+		if m := reServedATX.FindStringSubmatch(ln); m != nil {
+			id := ""
+			if idm := reServedHeadingID.FindStringSubmatch(m[2]); idm != nil {
+				id = idm[1]
+			}
+			hs = append(hs, heading{i, len(m[1]), id})
+		}
+	}
+	out := map[string]string{}
+	for j, h := range hs {
+		if h.id == "" {
+			continue
+		}
+		if _, dup := out[h.id]; dup {
+			continue
+		}
+		end := len(lines)
+		for _, n := range hs[j+1:] {
+			if n.level <= h.level {
+				end = n.line
+				break
+			}
+		}
+		out[h.id] = strings.TrimRight(strings.Join(lines[h.line:end], "\n"), "\n")
+	}
+	return out
+}
+
+// Prose returns markdown without its code blocks, for matching glossary terms
+// in part of a chapter.
+func Prose(md string) string {
+	var b strings.Builder
+	fenced := false
+	for ln := range strings.SplitSeq(md, "\n") {
+		if reServedFence.MatchString(ln) {
+			fenced = !fenced
+			continue
+		}
+		if !fenced {
+			b.WriteString(ln)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}

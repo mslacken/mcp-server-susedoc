@@ -65,6 +65,7 @@ func main() {
 	asJSON := flag.Bool("json", false, "with -dump, print documents as json instead of yaml")
 	loadWait := flag.Duration("loadwait", 30*time.Second, "how long a tool call to the stdio MCP server waits for the documents still loading in the background before it fails with an error asking to try again; the loading goes on; 0 waits without a limit")
 	loadTimeout := flag.Duration("loadtimeout", 0, "stop loading the documents after this duration, e.g. 2m, and fail all tool calls; 0 means no limit")
+	maxChars := flag.Int("maxchars", 20000, "maximum characters of markdown the read_document tool and the chapter resources return per call; longer chapters are split into pages read with the offset argument; 0 means no limit")
 	debugFlag := flag.Bool("debug", false, "log tool calls, web requests and DocBook parsing problems to stderr")
 	failWarn := flag.Bool("failwarn", false, "exit with an error if there were warnings while reading the documents, like files that were skipped")
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -133,7 +134,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "error reading input:", err)
 			}
 		}()
-		if err := mcpserver.NewLoadingServer(pending).Run(ctx, &mcp.StdioTransport{}); err != nil {
+		if err := mcpserver.NewLoadingServer(pending, mcpserver.Options{MaxChars: *maxChars}).Run(ctx, &mcp.StdioTransport{}); err != nil {
 			fmt.Fprintln(os.Stderr, "mcp server:", err)
 			os.Exit(1)
 		}
@@ -215,7 +216,7 @@ func main() {
 			}
 			scheme = "https"
 		}
-		srv := mcpserver.NewServer(corpus)
+		srv := mcpserver.NewServer(corpus, mcpserver.Options{MaxChars: *maxChars})
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil))
 		fmt.Fprintf(os.Stderr, "serving mcp server on %s://%s/mcp\n", scheme, addr)
@@ -248,7 +249,7 @@ func main() {
 	}
 	// -failwarn without another mode: the corpus is checked, serve it on
 	// stdin/stdout.
-	if err := mcpserver.NewServer(corpus).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+	if err := mcpserver.NewServer(corpus, mcpserver.Options{MaxChars: *maxChars}).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		fmt.Fprintln(os.Stderr, "mcp server:", err)
 		os.Exit(1)
 	}

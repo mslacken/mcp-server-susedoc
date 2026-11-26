@@ -327,6 +327,12 @@ func (c *Corpus) GlossaryForChapter(ch *Chapter) []GlossaryEntry {
 	return c.GlossaryFor(c.termsIn(ch.Prose))
 }
 
+// GlossaryForText returns the definitions of all glossary terms mentioned in
+// prose, e.g. the Prose of a single section.
+func (c *Corpus) GlossaryForText(prose string) []GlossaryEntry {
+	return c.GlossaryFor(c.termsIn(prose))
+}
+
 // DocsUsing returns the ids of the documents whose chapters mention term, in
 // document order. An empty list means no document uses the term.
 func (c *Corpus) DocsUsing(term string) []string {
